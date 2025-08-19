@@ -17,16 +17,26 @@ from pydantic_ai.messages import (
     ModelMessagesTypeAdapter
 )
 
-from rag_agent import agent, RAGDeps
-from utils import get_chroma_client
+# Load environment variables early and force override so updates in .env take effect
+load_dotenv(override=True)
 
-load_dotenv()
+from rag_agent import get_agent, RAGDeps
+from utils import get_chroma_client, resolve_collection_name, resolve_embedding_backend_and_model
 
-async def get_agent_deps():
+async def get_agent_deps(header_contains: str | None, source_contains: str | None, collection_name_input: str | None):
+    resolved_collection = resolve_collection_name(collection_name_input or None)
+    # Log once on startup via Streamlit status text and server log
+    print(f"[ui] Using ChromaDB collection: '{resolved_collection}'")
+    st.sidebar.caption(f"Active collection: {resolved_collection}")
+    backend, model = resolve_embedding_backend_and_model()
+    # Also display embeddings info once
+    st.sidebar.caption(f"Embeddings: {backend} / {model}")
     return RAGDeps(
         chroma_client=get_chroma_client("./chroma_db"),
-        collection_name="docs",
-        embedding_model="all-MiniLM-L6-v2"
+        collection_name=resolved_collection,
+        embedding_model="all-MiniLM-L6-v2",
+        header_contains=(header_contains or None),
+        source_contains=(source_contains or None),
     )
 
 
@@ -43,10 +53,28 @@ def display_message_part(part):
     # text
     elif part.part_kind == 'text':
         with st.chat_message("assistant"):
-            st.markdown(part.content)             
+            st.markdown(part.content)
+    elif part.part_kind == 'tool-return':
+        # Enhance display if metadata is present in context (non-breaking; retrieve format unchanged)
+        payload = getattr(part, 'content', None)
+        if isinstance(payload, dict):
+            # Best-effort display of title and section_path if present
+            title = payload.get('title')
+            section_path = payload.get('section_path')
+            source_url = payload.get('source_url')
+            if title or section_path or source_url:
+                with st.chat_message("assistant"):
+                    if title:
+                        st.markdown(f"**{title}**")
+                    if section_path:
+                        st.caption(section_path)
+                    if source_url and source_url.startswith('http'):
+                        st.markdown(f"[Source]({source_url})")
+                    elif source_url and source_url.startswith('file://'):
+                        st.caption(source_url.replace('file://', ''))
 
 async def run_agent_with_streaming(user_input):
-    async with agent.run_stream(
+    async with get_agent().run_stream(
         user_input, deps=st.session_state.agent_deps, message_history=st.session_state.messages
     ) as result:
         async for message in result.stream_text(delta=True):  
@@ -68,8 +96,34 @@ async def main():
     # Initialize chat history in session state if not present
     if "messages" not in st.session_state:
         st.session_state.messages = []
-    if "agent_deps" not in st.session_state:
-        st.session_state.agent_deps = await get_agent_deps()  
+    # Sidebar controls: collection display + optional filters
+    # Preserve last values via session_state keys
+    if "header_contains" not in st.session_state:
+        st.session_state.header_contains = ""
+    if "source_contains" not in st.session_state:
+        st.session_state.source_contains = ""
+
+    # Collection selector and filters
+    if "collection_name" not in st.session_state:
+        st.session_state.collection_name = resolve_collection_name(None)
+    st.sidebar.text_input("Collection name", key="collection_name", placeholder="e.g., docs, ibc-2018")
+    st.sidebar.markdown("### Retrieval Filters")
+    st.sidebar.text_input("Header contains", key="header_contains", placeholder="e.g., Section 1507")
+    st.sidebar.text_input("Source contains", key="source_contains", placeholder="e.g., pydantic.dev")
+
+    # Recreate deps each render so filters are applied
+    st.session_state.agent_deps = await get_agent_deps(
+        st.session_state.header_contains.strip() or None,
+        st.session_state.source_contains.strip() or None,
+        (st.session_state.collection_name.strip() or None),
+    )
+
+    # Show active collection and filters summary
+    st.sidebar.markdown(f"**Collection:** {st.session_state.agent_deps.collection_name}")
+    if st.session_state.header_contains or st.session_state.source_contains:
+        st.sidebar.caption(
+            f"Filters: header='{st.session_state.header_contains or ''}', source='{st.session_state.source_contains or ''}'"
+        )
 
     # Display all messages from the conversation so far
     # Each message is either a ModelRequest or ModelResponse.

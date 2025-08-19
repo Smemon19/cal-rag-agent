@@ -107,3 +107,18 @@ chroma_db/
 # Temporary files
 *.tmp
 *.temp 
+
+# Generated diagnostics and large artifacts under docs
+docs/diag_run_*/
+docs/diag_run_ibc/
+docs/diag_run_iebc/
+docs/diag_run_2bonus/
+docs/**/images/
+docs/**/renders/
+docs/**/ocr/
+docs/**/merged/
+docs/**/text/
+docs/**/report/
+
+# Local PDFs (keep versioned docs/** markdown, ignore raw PDFs)
+docs/pdfs/

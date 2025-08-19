@@ -27,12 +27,14 @@ An intelligent documentation crawler and retrieval-augmented generation (RAG) sy
 ## Installation
 
 1. **Clone the repository:**
+
    ```bash
    git clone https://github.com/coleam00/ottomator-agents.git
    cd ottomator-agents/crawl4AI-agent-v2
    ```
 
 2. **Install dependencies:**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # On Windows: venv\Scripts\activate
@@ -69,8 +71,9 @@ python insert_docs.py <URL> [--collection mydocs] [--db-dir ./chroma_db] [--embe
 ```
 
 **Arguments:**
+
 - `URL`: The root URL, .txt file, or sitemap to crawl.
-- `--collection`: ChromaDB collection name (default: `docs`)
+- `--collection`: ChromaDB collection name. Overrides environment for a single run.
 - `--db-dir`: Directory for ChromaDB data (default: `./chroma_db`)
 - `--embedding-model`: Embedding model for vector storage (default: `all-MiniLM-L6-v2`)
 - `--chunk-size`: Maximum characters per chunk (default: `1000`)
@@ -79,6 +82,7 @@ python insert_docs.py <URL> [--collection mydocs] [--db-dir ./chroma_db] [--embe
 - `--batch-size`: Batch size for ChromaDB insertion (default: `100`)
 
 **Examples for each type (regular URL, .txt, sitemap):**
+
 ```bash
 python insert_docs.py https://ai.pydantic.dev/
 python insert_docs.py https://ai.pydantic.dev/llms-full.txt
@@ -94,6 +98,7 @@ python insert_docs.py https://ai.pydantic.dev/sitemap.xml
 #### Metadata
 
 Each chunk is stored with:
+
 - Source URL
 - Chunk index
 - Extracted headers
@@ -142,6 +147,186 @@ crawl4AI-agent-v2/
 ├── .env.example
 └── README.md
 ```
+
+---
+
+## Ingestion & Retrieval Flow
+
+The system ingests URLs (regular, sitemap, or Markdown/txt) and local files (PDF or text). Type detection routes inputs to Crawl4AI-based crawling or to a PDF pipeline that extracts text, images, and OCR, then merges and chunks content. All sources are smart-chunked and enriched with standardized metadata before being inserted in batches into a single ChromaDB Collection created/opened with the selected embedding backend/model. The Streamlit chat UI calls a Pydantic AI agent whose typed retrieve tool performs hybrid retrieval (vector first, keyword fallback for exact literals/sections), merges results, applies optional filters, formats context, and streams the final LLM answer back to the UI.
+
+```mermaid
+graph LR
+  %% ===== Ingestion =====
+  subgraph Ingestion
+    I[Input: URL / sitemap / md|txt URL / local file (PDF or text)]
+    D[Type detection]
+    I --> D
+
+    %% Web ingestion
+    D -->|sitemap URL| S1[Parse sitemap]
+    S1 --> S2[Crawl batch (Crawl4AI + MemoryAdaptiveDispatcher)]
+    D -->|md/txt URL| M1[Fetch rendered content (Crawl4AI)]
+    D -->|regular URL| W1[Crawl & render to Markdown (Crawl4AI)]
+
+    %% PDF ingestion
+    D -->|local PDF| P1[Extract visible text per page]
+    P1 --> P2[Extract images per page]
+    P2 --> P3[OCR images]
+    P3 --> P4[Merge text + OCR per page]
+    P4 --> P5[Chunk merged text]
+
+    %% Local text files
+    D -->|local text file| F1[Read file as markdown]
+
+    %% Chunking & metadata
+    W1 --> C1[Smart chunk markdown]
+    M1 --> C1
+    F1 --> C1
+    P5 --> C2[Standardize metadata]
+    C1 --> C2
+    C2 --> C3[Insert chunks (batched)]
+    C3 --> C4[Create/Open collection (selected embedding backend/model)]
+  end
+
+  %% Central storage
+  C4 --> COL[ChromaDB Collection]
+
+  %% ===== Retrieval =====
+  subgraph Retrieval
+    UI[Streamlit Chat UI] --> AG[Pydantic AI Agent (typed retrieve tool)]
+    AG -->|vector query| COL
+    AG -->|keyword fallback| COL
+    COL --> MR[Merge results]
+    MR --> FLT[Optional filters: header_contains, source_contains]
+    FLT --> CTX[Format results as context]
+    CTX --> LLM[LLM answer (streamed tokens)]
+    LLM --> UI
+  end
+```
+
+---
+
+## Configuration: Collection Name
+
+- **RAG_COLLECTION_NAME**: Controls the default ChromaDB collection for both ingestion and the Streamlit UI.
+  - If unset or blank (whitespace only), the system falls back to `docs`.
+  - The ingestion CLI supports `--collection <name>` to override the environment for a single run.
+
+Examples:
+
+```bash
+# Use default (docs)
+unset RAG_COLLECTION_NAME
+python insert_docs.py https://example.com
+
+# Set env for both ingest and UI
+export RAG_COLLECTION_NAME=building-code
+python insert_docs.py https://example.com
+streamlit run streamlit_app.py
+
+# Override just for this ingest run
+export RAG_COLLECTION_NAME=building-code
+python insert_docs.py https://example.com --collection my-temp-collection
+```
+
+On startup, both ingestion and the UI log the resolved collection name once.
+
+---
+
+## Optional Retrieval Filters
+
+You can refine results using two optional filters that apply after retrieval and before the LLM sees the context:
+
+- `header_contains` (case-insensitive): Match a substring in the section header/path. Fallback order in metadata: `section_path` → `headers` → `title` → `header`.
+- `source_contains` (case-insensitive): Match a substring in the source identifier. Fallback order in metadata: `source_url` → `source` → `file_path`.
+
+Notes:
+
+- Empty/whitespace values are ignored. Very short filters (e.g., 1 character) can be noisy.
+- Filtering happens after vector+keyword merging and before final truncation.
+- If no results match, the context includes a brief notice suggesting you remove or relax filters.
+
+### Streamlit UI
+
+- Use the sidebar fields “Header contains” and “Source contains”. Leave blank for default behavior.
+
+### Programmatic usage
+
+If calling the retrieve tool directly, pass parameters:
+
+```python
+await retrieve(context, "your question", n_results=5, header_contains="Roofing", source_contains="pydantic.dev")
+```
+
+Filtering works best when ingestion stores `section_path` and `source_url` metadata, but it degrades gracefully if missing.
+
+---
+
+## Embedding Backends
+
+Choose the embedding provider via environment variables (centralized; no code changes needed in call sites):
+
+- `EMBEDDING_BACKEND`: `sentence` (default) or `openai`. Invalid values fall back to `sentence` with a warning.
+- `SENTENCE_MODEL`: sentence-transformers model (default: `all-MiniLM-L6-v2`).
+- `OPENAI_EMBED_MODEL`: OpenAI embeddings model (default: `text-embedding-3-large`). Requires `OPENAI_API_KEY`.
+
+Examples:
+
+```bash
+# Default: local sentence-transformers
+unset EMBEDDING_BACKEND SENTENCE_MODEL OPENAI_EMBED_MODEL
+streamlit run streamlit_app.py
+
+# Use a different sentence-transformers model
+export EMBEDDING_BACKEND=sentence
+export SENTENCE_MODEL=all-MiniLM-L12-v2
+streamlit run streamlit_app.py
+
+# Switch to OpenAI embeddings
+export EMBEDDING_BACKEND=openai
+export OPENAI_API_KEY=sk-...
+# optional override
+export OPENAI_EMBED_MODEL=text-embedding-3-small
+streamlit run streamlit_app.py
+```
+
+Notes and tradeoffs:
+
+- Local (sentence-transformers) costs nothing and works offline; larger models may use significant memory.
+- OpenAI embeddings can improve quality in some domains; requires API key and network access.
+- You can switch backends without reingesting for testing, but mixing embeddings inside the same Chroma collection is not recommended and may degrade retrieval. Prefer separate collections per backend.
+
+On startup, both ingestion and the UI log which backend and model are active.
+
+---
+
+## Metadata Schema for Chunks
+
+New ingests populate a standardized metadata schema to improve filtering and provenance. Legacy chunks still work via fallbacks, but reingestion is recommended for best results.
+
+- **source_url**: Canonical URL (normalized) or `file://` absolute path.
+- **source_type**: One of `web`, `pdf`, `markdown`, `txt`, `other`.
+- **section_path**: Human-readable hierarchy like `H1 > H2 > H3` (empty if not available).
+- **headers**: Raw header text found in the chunk.
+- **page_number**: PDF 1-based page number for the chunk; empty otherwise.
+- **char_count / word_count**: Character and word counts of the chunk content.
+- **chunk_id**: Stable deterministic id from source, section, page, and local index.
+- **inserted_at**: UTC ISO timestamp at ingestion time.
+- **content_preview**: First ~180 characters for quick UI previews.
+- **embedding_backend / embedding_model**: Copied from embeddings selection for audits.
+- **mime_type**: e.g., `text/markdown`, `application/pdf`, `text/plain`.
+- **title**: Best available title (web H1/HTML title, PDF metadata or filename, Markdown H1).
+
+Filtering leverages these fields via fallbacks (headers: `section_path` → `headers` → `title` → `header`; source: `source_url` → `source` → `file_path`).
+
+Example benefit:
+
+```
+section_path: Roofing > Section 1507 > Asphalt Shingles
+source_url: https://example.com/building-code/roofing
+```
+
+These make `header_contains=Shingles` and `source_contains=roofing` precise and robust.
 
 ---
 

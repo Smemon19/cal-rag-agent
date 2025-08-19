@@ -1,0 +1,59 @@
+TABLE 1507.9.6
+WOOD SHAKE MATERIAL REQUIREMENTS
+CSSB = Cedar Shake and Shingle Bureau.
+TFS = Forest Products Laboratory of the Texas Forest Services.
+1507.9.7 Attachment. Fasteners for wood shakes shall be
+corrosion resistant with a minimum penetration of 3/4 inch
+(19.1 mm) into the sheathing. For sheathing less than 1/2
+inch (12.7 mm) in thickness, the fasteners shall extend
+through the sheathing. Each shake shall be attached with
+not fewer than two fasteners.
+1507.9.8 Application. Wood shakes shall be laid with a
+side lap not less than 11/2 inches (38 mm) between joints in
+adjacent courses. Spacing between shakes in the same
+course shall be 3/8 to 5/8 inch (9.5 to 15.9 mm) for shakes and
+taper sawn shakes of naturally durable wood and shall be 1/4
+to 3/8 inch (6.4 to 9.5 mm) for preservative taper sawn
+shakes. Weather exposure for wood shakes shall not exceed
+those set in Table 1507.9.8.
+1507.9.9 Flashing. At the juncture of the roof and vertical
+surfaces, flashing and counterflashing shall be provided in
+accordance with the manufacturer’s installation instructions,
+and where of metal, shall be not less than 0.019-inch
+(0.48 mm) (No. 26 galvanized sheet gage) corrosion-resistant
+metal. The valley flashing shall extend not less than
+11 inches (279 mm) from the centerline each way and
+have a splash diverter rib not less than 1 inch (25 mm)
+high at the flow line formed as part of the flashing. Sections
+of flashing shall have an end lap of not less than 4
+inches (102 mm). For roof slopes of three units vertical in
+12 units horizontal (25-percent slope) and over, the valley
+flashing shall have a 36-inch-wide (914 mm) underlayment
+of either one layer of Type I underlayment running
+the full length of the valley or a self-adhering polymer-
+modified bitumen sheet bearing a label indicating compliance
+with ASTM D1970, in addition to other required
+underlayment. In areas where the average daily temperature
+in January is 25°F (-4°C) or less or where there is a
+possibility of ice forming along the eaves causing a
+backup of water, the metal valley flashing underlayment
+shall be solidly cemented to the roofing underlayment for
+slopes under seven units vertical in 12 units horizontal.
+
+1507.9.10 Label required. Each bundle of shakes shall be
+identified by a label of an approved grading or inspection
+bureau or agency.
+1507.10 Built-up roofs. The installation of built-up roofs
+shall comply with the provisions of this section.
+1507.10.1 Slope. Built-up roofs shall have a design slope
+of not less than one-fourth unit vertical in 12 units horizontal
+(2-percent slope) for drainage, except for coal-tar
+built-up roofs that shall have a design slope of not less
+than one-eighth unit vertical in 12 units horizontal (1-percent
+slope).
+MATERIAL    MINIMUM GRADES    APPLICABLE GRADING RULES
+Wood shakes of naturally durable wood    1    CSSB
+Taper sawn shakes of naturally durable wood    1 or 2    CSSB
+Preservative-treated shakes and shingles of naturally durable wood    1    CSSB
+Fire-retardant-treated shakes and shingles of naturally durable wood    1    CSSB
+Preservative-treated taper sawn shakes of Southern pine treated in accordance with AWPA U1 (Commodity Spec)    1 or 2    TFS
