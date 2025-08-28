@@ -1,0 +1,10 @@
+{
+  "sec": "1607.10.4",
+  "title": "Fall arrest anchorages",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "per_lifeline", "label": "Design load per attached lifeline", "value": "3100", "units": "lb", "note": "Design live load per lifeline."}
+  ]
+}
+
+

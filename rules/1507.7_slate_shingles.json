@@ -1,0 +1,15 @@
+{
+  "sec": "1507.7",
+  "title": "Slate shingles",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "material_standard", "label": "Material standard", "value": "ASTM C406", "units": "", "note": "Slate units"},
+    {"key": "min_slope", "label": "Minimum slope", "value": "4:12", "units": "slope", "note": "Roof slope requirement"},
+    {"key": "decking", "label": "Decking", "value": "Solidly sheathed", "units": "", "note": ""},
+    {"key": "ice_barrier", "label": "Ice barrier", "value": "Per 1507.1.2", "units": "", "note": ""},
+    {"key": "underlayment_V_lt_140", "label": "Underlayment (V < 140 mph)", "value": "ASTM D226 Type II; ASTM D4869 Type III or IV", "units": "", "note": "Use table reference in your docs"},
+    {"key": "underlayment_V_ge_140", "label": "Underlayment (V ≥ 140 mph)", "value": "(set to the exact text from your table)", "units": "", "note": "Fill from the ingested table"}
+  ]
+}
+
+

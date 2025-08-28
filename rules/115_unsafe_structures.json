@@ -1,0 +1,12 @@
+{
+  "sec": "115",
+  "title": "Unsafe structures and equipment",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "notice", "label": "Notice/order", "value": "Issue notice of unsafe condition", "units": "", "note": "May require vacation"},
+    {"key": "actions", "label": "Actions", "value": "Repair, alter, or demolish unsafe part(s)", "units": "", "note": "Stop work order as needed"},
+    {"key": "restoration", "label": "Restoration", "value": "May be restored to safe condition", "units": "", "note": "Subject to approval"}
+  ]
+}
+
+

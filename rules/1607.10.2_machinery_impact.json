@@ -1,0 +1,11 @@
+{
+  "sec": "1607.10.2",
+  "title": "Machinery impact",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "light_machinery", "label": "Light machinery", "value": "+20%", "units": "percent", "note": "Impact allowance (factor 1.20)."},
+    {"key": "reciprocating_machinery", "label": "Reciprocating machinery", "value": "+50%", "units": "percent", "note": "Impact allowance (factor 1.50)."}
+  ]
+}
+
+

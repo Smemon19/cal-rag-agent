@@ -344,3 +344,24 @@ These make `header_contains=Shingles` and `source_contains=roofing` precise and 
 - Ensure all dependencies are installed and environment variables are set.
 - For large sites, increase memory or decrease `--max-concurrent`.
 - If you encounter crawling issues, try running the example scripts for isolated debugging.
+
+---
+
+## Evaluation
+
+A lightweight evaluation suite lives in `eval/`.
+
+- Run ad-hoc evaluation and write a report:
+
+```bash
+make eval
+```
+
+- Run smoke tests (deterministic string checks for critical rules):
+
+```bash
+make tests
+```
+
+The eval CLI (`eval/runner.py`) reads `eval/dataset.jsonl`, calls the agent for each
+question, scores using `eval/rubric.py`, prints per-item scores, and writes `eval/report.md`.

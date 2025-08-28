@@ -1,0 +1,10 @@
+{
+  "sec": "(local/IBC ref for existing means of egress)",
+  "title": "Existing fire escapes",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "continue_use", "label": "Continued use", "value": "Permitted if in good condition and compliant", "units": "", "note": "No age-based mandatory replacement unless triggered by scope"}
+  ]
+}
+
+

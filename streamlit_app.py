@@ -2,6 +2,7 @@ from dotenv import load_dotenv
 import streamlit as st
 import asyncio
 import os
+from pathlib import Path
 
 # Import all the message part classes
 from pydantic_ai.messages import (
@@ -17,14 +18,16 @@ from pydantic_ai.messages import (
     ModelMessagesTypeAdapter
 )
 
-# Load environment variables early and force override so updates in .env take effect
-load_dotenv(override=True)
+# Resolve and load .env from writable AppData directory; create scaffold on first run
+from utils import get_chroma_client, resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, get_default_chroma_dir
+
+ensure_appdata_scaffold()
+load_dotenv(dotenv_path=get_env_file_path(), override=True)
 
 from rag_agent import get_agent, RAGDeps
-from utils import get_chroma_client, resolve_collection_name, resolve_embedding_backend_and_model
 
-async def get_agent_deps(header_contains: str | None, source_contains: str | None, collection_name_input: str | None):
-    resolved_collection = resolve_collection_name(collection_name_input or None)
+async def get_agent_deps(header_contains: str | None, source_contains: str | None):
+    resolved_collection = "docs_ibc_v2"
     # Log once on startup via Streamlit status text and server log
     print(f"[ui] Using ChromaDB collection: '{resolved_collection}'")
     st.sidebar.caption(f"Active collection: {resolved_collection}")
@@ -32,7 +35,7 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
     # Also display embeddings info once
     st.sidebar.caption(f"Embeddings: {backend} / {model}")
     return RAGDeps(
-        chroma_client=get_chroma_client("./chroma_db"),
+        chroma_client=get_chroma_client(get_default_chroma_dir()),
         collection_name=resolved_collection,
         embedding_model="all-MiniLM-L6-v2",
         header_contains=(header_contains or None),
@@ -103,10 +106,7 @@ async def main():
     if "source_contains" not in st.session_state:
         st.session_state.source_contains = ""
 
-    # Collection selector and filters
-    if "collection_name" not in st.session_state:
-        st.session_state.collection_name = resolve_collection_name(None)
-    st.sidebar.text_input("Collection name", key="collection_name", placeholder="e.g., docs, ibc-2018")
+    # Filters (collection is fixed to docs_ibc_v2)
     st.sidebar.markdown("### Retrieval Filters")
     st.sidebar.text_input("Header contains", key="header_contains", placeholder="e.g., Section 1507")
     st.sidebar.text_input("Source contains", key="source_contains", placeholder="e.g., pydantic.dev")
@@ -115,7 +115,6 @@ async def main():
     st.session_state.agent_deps = await get_agent_deps(
         st.session_state.header_contains.strip() or None,
         st.session_state.source_contains.strip() or None,
-        (st.session_state.collection_name.strip() or None),
     )
 
     # Show active collection and filters summary

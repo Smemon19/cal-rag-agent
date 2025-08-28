@@ -1,0 +1,12 @@
+{
+  "sec": "603",
+  "title": "Alteration levels",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "level_1", "label": "Level 1", "value": "Work on existing elements", "units": "", "note": "Replacement/repair of finishes, equipment, fixtures"},
+    {"key": "level_2", "label": "Level 2", "value": "Reconfiguration of space; addition/removal of non-structural elements; new systems", "units": "", "note": "Work area ≤ 50% qualifies"},
+    {"key": "level_3", "label": "Level 3", "value": "Work area > 50% of building area", "units": "", "note": ""}
+  ]
+}
+
+

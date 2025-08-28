@@ -28,11 +28,26 @@ from utils import (
     normalize_source_url,
     build_section_path,
     make_chunk_metadata,
+    get_env_file_path,
+    ensure_appdata_scaffold,
+    get_default_chroma_dir,
     
 )
+from utils_tables import parse_markdown_table, pick_underlayment
+import itertools
+from tools_calc import (
+    deflection_limit,
+    vehicle_barrier_reaction,
+    fall_anchor_design_load,
+    wind_speed_category,
+    machinery_impact_factor,
+)
+from rules_loader import load_all_rules, find_rules_by_section, find_rules_by_keywords
+from verify import verify_answer
 
-# Load environment variables from .env file, overriding any existing values
-dotenv.load_dotenv(override=True)
+# Ensure appdata scaffold and load .env from there so user config persists across updates
+ensure_appdata_scaffold()
+dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=True)
 
 # Check for OpenAI API key
 if not os.getenv("OPENAI_API_KEY"):
@@ -54,12 +69,12 @@ class RAGDeps:
 class RagAgent:
     """RAG Agent for handling document insertion from URLs and local files."""
     
-    def __init__(self, collection_name: Optional[str] = None, db_directory: str = "./chroma_db", 
+    def __init__(self, collection_name: Optional[str] = None, db_directory: str = "", 
                  embedding_model: str = "all-MiniLM-L6-v2"):
         # Resolve collection name with precedence: CLI > env > default
         resolved_collection = resolve_collection_name(collection_name)
         self.collection_name = resolved_collection
-        self.db_directory = db_directory
+        self.db_directory = db_directory or get_default_chroma_dir()
         self.embedding_model = embedding_model
         self.client = get_chroma_client(db_directory)
         # Log which embedding backend/model are active once during agent init
@@ -447,13 +462,19 @@ def create_agent():
         system_prompt="You are a helpful assistant that answers questions based on the provided documentation. "
                       "Use the retrieve tool to get relevant information from the documentation before answering. "
                       "If the documentation doesn't contain the answer, clearly state that the information isn't available "
-                      "in the current documentation and provide your best general knowledge response."
+                      "in the current documentation and provide your best general knowledge response. "
+                      "When you call a calculation tool, echo the input and output clearly in your answer, e.g., "
+                      "'For a 30 ft span with L/180: Max deflection = 2.0 in (IBC Table 1604.3). "
+                      "If a RULE SNIPPET is present, quote its values verbatim first, cite the section number, "
+                      "and avoid unrelated standards unless explicitly asked. "
+                      "If the retrieved context contains a section/table token and exact numeric terms, you MUST include those exact tokens in the answer and cite the section/table (e.g., 'IBC 2018 §1607.9' or 'Table 1604.3'). Prefer brevity and precision."
     )
 
 # Initialize agent as None and track the last key used to recreate if it changes
 agent = None
 _last_openai_key = None
 _last_model_choice = None
+_last_retrieve_context: str = ""
 
 
 def get_agent():
@@ -495,7 +516,229 @@ async def retrieve(
         context.deps.collection_name,
         embedding_model_name=context.deps.embedding_model
     )
-    
+    # Ensure rules are loaded (no-op if already)
+    try:
+        load_all_rules("rules")
+    except Exception:
+        pass
+    # ===== Pre-vector: Specialized table lookup for certain materials and wind speeds =====
+    table_prefix_context: str = ""
+    try:
+        ql = (search_query or "").lower()
+        known_materials = [
+            # Slate
+            "slate shingles",
+            "slate shingle",
+            "slate shingle roof",
+            # Asphalt
+            "asphalt shingles",
+            "asphalt shingle",
+            "asphalt shingle roof",
+            # Vehicle barriers
+            "vehicle barrier",
+            "vehicle barriers",
+        ]
+        material_hit = next((m for m in known_materials if m in ql), None)
+        mph_match = re.search(r"(\d{2,3})\s*mph", ql)
+        wind_mph_val = int(mph_match.group(1)) if mph_match else None
+
+        if material_hit and wind_mph_val is not None:
+            # Scan candidate chunks by keyword for tables
+            substrings = [material_hit, "table", "underlayment", "1507"]
+            scan = keyword_search_collection(collection, substrings, max_results=max(15, n_results))
+            docs = scan.get("documents", [[]])[0]
+            metas = scan.get("metadatas", [[]])[0]
+
+            chosen_value: Optional[str] = None
+            citation: str = ""
+
+            for doc, meta in zip(docs, metas):
+                for df in parse_markdown_table(doc or ""):
+                    val = pick_underlayment(df, material_hit, wind_mph_val)
+                    if val:
+                        chosen_value = val
+                        # Build citation: try to detect table number and code name
+                        table_num = None
+                        m = re.search(r"\btable\s+([0-9]+(?:\.[0-9]+)*)", (doc or ""), flags=re.IGNORECASE)
+                        if m:
+                            table_num = m.group(1)
+                        else:
+                            sp = str((meta or {}).get("section_path") or (meta or {}).get("headers") or "")
+                            m2 = re.search(r"([0-9]+(?:\.[0-9]+)+)", sp)
+                            if m2:
+                                table_num = m2.group(1)
+
+                        title = str((meta or {}).get("title") or "")
+                        src = str((meta or {}).get("source_url") or "")
+                        code_short = ""
+                        mapping = [
+                            ("international building code", "IBC"),
+                            ("international existing building code", "IEBC"),
+                            ("international residential code", "IRC"),
+                        ]
+                        hay = f"{title} {src}".lower()
+                        for needle, short in mapping:
+                            if needle in hay:
+                                code_short = short
+                                break
+                        if code_short and table_num:
+                            citation = f"{code_short} Table {table_num}"
+                        elif table_num:
+                            citation = f"Table {table_num}"
+                        elif code_short:
+                            citation = code_short
+                        else:
+                            citation = "Table lookup"
+
+                        # Compose prefix context
+                        mat_pretty = material_hit
+                        table_prefix_context = (
+                            f"TABLE LOOKUP RESULT: Underlayment for '{mat_pretty}' at wind speed {wind_mph_val} mph: {chosen_value} ({citation})\n\n"
+                        )
+                        print(f"[table_lookup] match material='{mat_pretty}' wind_mph={wind_mph_val} -> '{chosen_value}' [{citation}]")
+                        break
+                if chosen_value:
+                    break
+    except Exception as e:
+        # Fail open; do not block retrieval on table parsing errors
+        print(f"[table_lookup] Error during table scan: {e}")
+
+    # ===== Section locking: restrict candidates to chunks matching section tokens =====
+    section_tokens = re.findall(r"\b\d+(?:\.\d+)+\b", search_query or "")
+    lock_applied = False
+    lock_candidates = None
+    if section_tokens:
+        # Build ordered fallbacks: for each token, include itself then shorter prefixes
+        def prefixes(tok: str) -> List[str]:
+            parts = tok.split('.')
+            out = [tok]
+            if len(parts) >= 2:
+                out.append('.'.join(parts[:2]))
+            if len(parts) >= 1:
+                out.append(parts[0])
+            # Dedup preserve order
+            seen = set()
+            res = []
+            for t in out:
+                if t not in seen:
+                    seen.add(t)
+                    res.append(t)
+            return res
+
+        token_fallbacks = [prefixes(t) for t in section_tokens]
+        # Flatten by priority tiers across tokens: first try full sections for all, etc.
+        tiers = list(itertools.zip_longest(*token_fallbacks))
+        tiers_flat: List[str] = []
+        for tier in tiers:
+            for t in tier:
+                if t:
+                    tiers_flat.append(t)
+
+        # Initial candidate pool: vector + keyword merge similar to below but larger for filtering
+        base_results = query_collection(collection, search_query, n_results=max(n_results, 25))
+        base_ids = [*base_results.get("ids", [[]])[0]]
+        base_docs = [*base_results.get("documents", [[]])[0]]
+        base_metas = [*base_results.get("metadatas", [[]])[0]]
+
+        # Add keyword scan candidates to broaden the pool
+        kw_scan = keyword_search_collection(collection, [search_query], max_results=100)
+        for i, id_ in enumerate(kw_scan.get("ids", [[]])[0]):
+            if id_ not in base_ids:
+                base_ids.append(id_)
+                base_docs.append(kw_scan.get("documents", [[]])[0][i])
+                base_metas.append(kw_scan.get("metadatas", [[]])[0][i])
+
+        total_before = len(base_ids)
+
+        kept_ids: List[str] = []
+        kept_docs: List[str] = []
+        kept_metas: List[Dict[str, Any]] = []
+
+        # Try tiers in order until we have any matches
+        for tier_token in tiers_flat:
+            ids_t: List[str] = []
+            docs_t: List[str] = []
+            metas_t: List[Dict[str, Any]] = []
+            tt_l = tier_token.lower()
+            for id_, doc, meta in zip(base_ids, base_docs, base_metas):
+                meta = meta or {}
+                header_text = str(meta.get("section_path") or meta.get("headers") or meta.get("title") or meta.get("header") or "")
+                text = f"{header_text}\n{doc}".lower()
+                if tt_l in text:
+                    ids_t.append(id_)
+                    docs_t.append(doc)
+                    metas_t.append(meta)
+            if ids_t:
+                kept_ids, kept_docs, kept_metas = ids_t, docs_t, metas_t
+                lock_applied = True
+                print(f"[retrieve] section_lock applied: tokens=['{tier_token}']; kept={len(kept_ids)}/{total_before} candidates")
+                break
+
+        if lock_applied:
+            lock_candidates = {
+                "ids": [kept_ids[:n_results]],
+                "documents": [kept_docs[:n_results]],
+                "metadatas": [kept_metas[:n_results]],
+                "distances": [[0.0] * min(n_results, len(kept_ids))],
+            }
+
+    # ===== Rule snippets injection (before formatting/vector context) =====
+    rules_prefix_context: str = ""
+    try:
+        # Prefer exact section tokens; else keyword-based search
+        rule_hits: List[Dict[str, Any]] = []
+        if section_tokens:
+            # Try exact then prefixes
+            for tok in section_tokens:
+                # exact
+                rh = find_rules_by_section(tok)
+                if rh:
+                    rule_hits = rh
+                    break
+                # prefix fallbacks
+                parts = tok.split('.')
+                for i in range(len(parts)-1, 0, -1):
+                    prefix = '.'.join(parts[:i])
+                    rh = find_rules_by_section(prefix)
+                    if rh:
+                        rule_hits = rh
+                        break
+                if rule_hits:
+                    break
+        if not rule_hits:
+            # Keyword-based lookup with simple tokens from the query
+            kw_tokens = re.findall(r"[a-zA-Z]+", search_query or "")
+            candidates = find_rules_by_keywords(kw_tokens)
+            if candidates:
+                # take the highest-scoring rule group
+                top_rule = candidates[0][0]
+                rule_hits = [top_rule]
+
+        if rule_hits:
+            # For simplicity, display the first matching rule (could be extended)
+            r = rule_hits[0]
+            sec = str(r.get("sec") or "").strip()
+            title = str(r.get("title") or "").strip()
+            ver = str(r.get("version") or "").strip()
+            items = r.get("items", []) or []
+            header = f"RULE SNIPPET ({ver} §{sec} – {title}):\n"
+            lines = []
+            for it in items:
+                label = str(it.get("label") or "").strip()
+                value = str(it.get("value") or "").strip()
+                note = str(it.get("note") or "").strip()
+                if note:
+                    lines.append(f"- {label}: {value} ({note})")
+                else:
+                    lines.append(f"- {label}: {value}")
+            rules_prefix_context = header + "\n".join(lines) + "\n\n"
+
+            # Log injected snippet
+            tokens_preview = re.findall(r"[a-zA-Z]+", search_query or "")[:5]
+            print(f"[rules] injected §{sec} ({len(items)} items) for query tokens={tokens_preview}")
+    except Exception as e:
+        print(f"[rules] Error during snippet injection: {e}")
+
     # Vector query first
     query_results = query_collection(collection, search_query, n_results=n_results)
 
@@ -587,27 +830,46 @@ async def retrieve(
         }
         return format_results_as_context(query_results)
 
-    # Trim to n_results after optional filtering
-    query_results = {
-        "ids": [vec_ids[:n_results]],
-        "documents": [vec_docs[:n_results]],
-        "metadatas": [vec_metas[:n_results]],
-        "distances": [[0.0] * min(n_results, len(vec_ids))],  # placeholder
-    }
+    # Trim to n_results after optional filtering or section lock
+    if lock_candidates:
+        query_results = lock_candidates
+    else:
+        query_results = {
+            "ids": [vec_ids[:n_results]],
+            "documents": [vec_docs[:n_results]],
+            "metadatas": [vec_metas[:n_results]],
+            "distances": [[0.0] * min(n_results, len(vec_ids))],  # placeholder
+        }
     
-    # Format the results as context
-    return format_results_as_context(query_results)
+    # Format the results as context (prepend rules and table lookup if available)
+    base_ctx = format_results_as_context(query_results)
+    prefix = ""
+    if rules_prefix_context:
+        prefix += rules_prefix_context
+    if table_prefix_context:
+        prefix += table_prefix_context
+    final_ctx = (prefix + base_ctx) if prefix else base_ctx
+    # Stash for verification step
+    global _last_retrieve_context
+    _last_retrieve_context = final_ctx
+    return final_ctx
 
 
 def _register_tools(agent_instance: Agent) -> None:
     """Register all tools on the provided agent instance."""
     agent_instance.tool(retrieve)
+    # Calculation tools (pure functions; no RunContext)
+    agent_instance.tool(deflection_limit)
+    agent_instance.tool(vehicle_barrier_reaction)
+    agent_instance.tool(fall_anchor_design_load)
+    agent_instance.tool(wind_speed_category)
+    agent_instance.tool(machinery_impact_factor)
 
 
 async def run_rag_agent(
     question: str,
     collection_name: Optional[str] = None,
-    db_directory: str = "./chroma_db",
+    db_directory: str = "",
     embedding_model: str = "all-MiniLM-L6-v2",
     n_results: int = 5
 ) -> str:
@@ -628,15 +890,65 @@ async def run_rag_agent(
 
     # Create dependencies
     deps = RAGDeps(
-        chroma_client=get_chroma_client(db_directory),
+        chroma_client=get_chroma_client(db_directory or get_default_chroma_dir()),
         collection_name=resolved_collection,
         embedding_model=embedding_model
     )
     
-    # Run the agent
+    # First draft
     result = await get_agent().run(question, deps=deps)
-    
-    return result.data
+    answer_text = result.data
+
+    # Verify against last retrieval context
+    ctx_text = _last_retrieve_context or ""
+    try:
+        ver = verify_answer(answer_text, ctx_text)
+    except Exception as e:
+        print(f"[verify] error: {e}")
+        return answer_text
+
+    if ver.get("ok"):
+        print("[verify] ok")
+        return answer_text
+
+    missing = ver.get("missing", {}) or {}
+    mis_sections = missing.get("sections", []) or []
+    mis_nums = missing.get("nums", []) or []
+    mis_stds = missing.get("standards", []) or []
+    print(f"[verify] missing sections={mis_sections} nums={mis_nums} standards={mis_stds}")
+
+    # One focused retry with hint and keyword expansion
+    retry_tokens: List[str] = [*mis_sections, *mis_nums, *mis_stds]
+    retry_tokens = [t for t in retry_tokens if t]
+    if retry_tokens:
+        hint = (
+            "Your previous draft omitted these tokens found in source: "
+            + ", ".join(retry_tokens[:8])
+            + ". You must include them verbatim and cite the section/table."
+        )
+        hinted_q = f"{hint}\n\n{question}"
+
+        # Light keyword search to broaden candidates (non-blocking)
+        try:
+            coll = get_or_create_collection(get_chroma_client(db_directory), resolved_collection, embedding_model_name=embedding_model)
+            _ = keyword_search_collection(coll, retry_tokens, max_results=5)
+        except Exception:
+            pass
+
+        result2 = await get_agent().run(hinted_q, deps=deps)
+        answer2 = result2.data
+        try:
+            ver2 = verify_answer(answer2, _last_retrieve_context or ctx_text)
+        except Exception:
+            ver2 = {"ok": False}
+        if ver2.get("ok"):
+            print("[verify] ok (retry)")
+        else:
+            print("[verify] retry still missing")
+        return answer2
+
+    # If nothing actionable, return first draft
+    return answer_text
 
 
 def main():
@@ -644,7 +956,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run a Pydantic AI agent with RAG using ChromaDB")
     parser.add_argument("--question", help="The question to answer about Pydantic AI")
     parser.add_argument("--collection", default=None, help="Name of the ChromaDB collection (overrides env)")
-    parser.add_argument("--db-dir", default="./chroma_db", help="Directory where ChromaDB data is stored")
+    parser.add_argument("--db-dir", default="", help="Directory where ChromaDB data is stored (default: AppData)")
     parser.add_argument("--embedding-model", default="all-MiniLM-L6-v2", help="Name of the embedding model to use")
     parser.add_argument("--n-results", type=int, default=5, help="Number of results to return from the retrieval")
     
@@ -658,7 +970,7 @@ def main():
     response = asyncio.run(run_rag_agent(
         args.question,
         collection_name=resolved_name,
-        db_directory=args.db_dir,
+        db_directory=args.db_dir or get_default_chroma_dir(),
         embedding_model=args.embedding_model,
         n_results=args.n_results
     ))

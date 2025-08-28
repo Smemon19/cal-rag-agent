@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import List, Optional
+import os
 import pytesseract
 from PIL import Image, ImageOps
 
@@ -29,6 +30,14 @@ def ocr_image_paths(
     oem: OCR Engine Mode (3: Default, based on what is available)
     preserve_line_breaks: Keep line breaks to help retain table-like structures
     """
+    # Allow overriding the tesseract.exe path via environment variable on Windows installers
+    tess_exe = os.getenv("TESSERACT_EXE")
+    if tess_exe:
+        try:
+            pytesseract.pytesseract.tesseract_cmd = tess_exe
+        except Exception:
+            pass
+
     if not image_paths:
         return ""
 

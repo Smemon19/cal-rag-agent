@@ -1,0 +1,10 @@
+{
+  "sec": "1607.9",
+  "title": "Vehicle barrier systems",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "barrier_load", "label": "Concentrated load", "value": "6000", "units": "lb", "note": "Applied horizontally in any direction."}
+  ]
+}
+
+

@@ -1,0 +1,11 @@
+{
+  "sec": "1604.3",
+  "title": "Deflection limits (notes)",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "roof_no_ceiling", "label": "Roof members not supporting a ceiling", "value": "L/180", "units": "ratio", "note": "Primary limit"},
+    {"key": "roof_no_ceiling_D_plus_creep", "label": "D+long-term (creep) note", "value": "L/120", "units": "ratio", "note": "Per table note for D plus long-term effects"}
+  ]
+}
+
+

@@ -12,9 +12,65 @@ import hashlib
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 from datetime import datetime, timezone
 from pathlib import Path
+from utils_normalize import normalize_inequalities, expand_numeric_tokens, pair_unit_synonyms
 
 _embedding_factory_logged: bool = False
 _DEFAULT_OVERLAP_CHARS: int = 150
+
+
+def get_appdata_base_dir() -> str:
+    """Return the base writable application data directory for this app.
+
+    - On Windows: %LOCALAPPDATA%\\CalRAG
+    - On other OS: ~/.calrag
+    """
+    try:
+        local_appdata = os.getenv("LOCALAPPDATA")
+        if local_appdata:
+            return str(Path(local_appdata) / "CalRAG")
+    except Exception:
+        pass
+    # Fallback for non-Windows
+    return str(Path.home() / ".calrag")
+
+
+def get_env_file_path() -> str:
+    """Return the absolute path to the app's .env file in the appdata dir."""
+    return str(Path(get_appdata_base_dir()) / ".env")
+
+
+def get_default_chroma_dir() -> str:
+    """Return the default path for Chroma persistence under the appdata dir."""
+    return str(Path(get_appdata_base_dir()) / "chroma")
+
+
+def ensure_appdata_scaffold() -> None:
+    """Ensure base appdata directories exist and a template .env is present on first run."""
+    base_dir = Path(get_appdata_base_dir())
+    chroma_dir = Path(get_default_chroma_dir())
+    base_dir.mkdir(parents=True, exist_ok=True)
+    chroma_dir.mkdir(parents=True, exist_ok=True)
+
+    env_path = Path(get_env_file_path())
+    if not env_path.exists():
+        # Minimal template for first run
+        template = (
+            "# Cal RAG Agent configuration\n"
+            "# Fill in your API key if using OpenAI models.\n"
+            "MODEL_CHOICE=gpt-4.1-mini\n"
+            "OPENAI_API_KEY=\n"
+            "# Embeddings backend: sentence (default) or openai\n"
+            "EMBEDDING_BACKEND=sentence\n"
+            "# Optional sentence-transformers model\n"
+            "SENTENCE_MODEL=all-MiniLM-L6-v2\n"
+            "# Default collection name for UI and ingest\n"
+            "RAG_COLLECTION_NAME=docs\n"
+        )
+        try:
+            env_path.write_text(template, encoding="utf-8")
+        except Exception:
+            # Best-effort; continue without blocking
+            pass
 
 def resolve_overlap_chars(cli_value: Optional[int] = None) -> int:
     """Resolve chunk overlap in characters from CLI or env.
@@ -226,11 +282,13 @@ def get_chroma_client(persist_directory: str) -> chromadb.PersistentClient:
     Returns:
         A ChromaDB PersistentClient
     """
+    # If caller passed a falsey value, resolve default under appdata
+    final_dir = persist_directory or get_default_chroma_dir()
     # Create the directory if it doesn't exist
-    os.makedirs(persist_directory, exist_ok=True)
+    os.makedirs(final_dir, exist_ok=True)
     
     # Return the client
-    return chromadb.PersistentClient(persist_directory)
+    return chromadb.PersistentClient(final_dir)
 
 
 def get_or_create_collection(
@@ -463,29 +521,41 @@ def build_section_search_terms(query: str) -> List[str]:
 
     Extract sequences like 1507.9.6 and also partials (1507.9, 1507) to improve recall.
     """
-    terms: List[str] = []
-    q = query.strip()
-    terms.append(q)
+    # Normalize inequalities and whitespace
+    q_raw = query or ""
+    q_norm = normalize_inequalities(q_raw.strip())
 
-    # Common prefixes
+    terms: List[str] = []
+    terms.append(q_norm)
+
+    # Common prefixes with normalized text
     terms.extend([
-        q.replace("section", "", 1).strip(),
-        q.replace("Section", "", 1).strip(),
-        q.replace("TABLE", "", 1).strip(),
-        q.replace("Table", "", 1).strip(),
+        q_norm.replace("section", "", 1).strip(),
+        q_norm.replace("Section", "", 1).strip(),
+        q_norm.replace("TABLE", "", 1).strip(),
+        q_norm.replace("Table", "", 1).strip(),
     ])
 
     # Extract dotted numeric references (e.g., 1507.9.6)
-    matches = re.findall(r"\b\d+(?:\.\d+)+\b", q)
-    for m in matches:
+    section_matches = re.findall(r"\b\d+(?:\.\d+)+\b", q_norm)
+    for m in section_matches:
         parts = m.split(".")
-        # full, then progressively shorter prefixes
-        for i in range(len(parts), 0, -1):
+        # Always include full section
+        terms.append(m)
+        # And progressively shorter prefixes
+        for i in range(1, len(parts)):
             terms.append(".".join(parts[:i]))
+
+    # Numeric expansion variants (mph, lb/kN, inequalities, etc.)
+    num_expanded = expand_numeric_tokens(q_norm)
+    terms.extend(num_expanded)
+
+    # Pair unit synonyms within tokens
+    terms = pair_unit_synonyms(terms)
 
     # Deduplicate while preserving order
     seen = set()
-    unique_terms = []
+    unique_terms: List[str] = []
     for t in terms:
         if t and t not in seen:
             seen.add(t)

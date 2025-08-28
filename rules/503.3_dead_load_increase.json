@@ -1,0 +1,10 @@
+{
+  "sec": "503.3",
+  "title": "Existing structures – increased dead load trigger",
+  "version": "IBC 2018",
+  "items": [
+    {"key": "threshold", "label": "Trigger threshold", "value": "> 5%", "units": "percent", "note": "If increased dead load exceeds 5%, evaluate and strengthen members as required."}
+  ]
+}
+
+
