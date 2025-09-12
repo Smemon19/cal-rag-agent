@@ -1,0 +1,16 @@
+[server]
+fileWatcherType = "watchdog"
+
+[runner]
+installTracer = false
+
+[client]
+showErrorDetails = true
+
+[global]
+# Exclude large/irrelevant paths from the watcher
+excludeWatchGlobs = [
+  "venv/**",
+  ".git/**",
+  "**/__pycache__/**"
+]

@@ -5,7 +5,6 @@ import pathlib
 from typing import List, Dict, Any, Optional, Iterable, Set
 
 import chromadb
-from chromadb.utils import embedding_functions
 from more_itertools import batched
 import re
 import hashlib
@@ -40,7 +39,42 @@ def get_env_file_path() -> str:
 
 
 def get_default_chroma_dir() -> str:
-    """Return the default path for Chroma persistence under the appdata dir."""
+    """Return the default path for Chroma persistence.
+
+    Resolution order:
+    1) Environment variable CHROMA_DIR (expanded, if set and non-empty)
+    2) Repository-local 'chroma_db' directory (if exists and non-empty)
+    3) Appdata directory fallback: ~/.calrag/chroma (or %LOCALAPPDATA%\\CalRAG\\chroma on Windows)
+    """
+    # 1) Explicit override via environment
+    try:
+        env_dir = os.getenv("CHROMA_DIR", "")
+        if env_dir and str(env_dir).strip() != "":
+            return str(Path(env_dir).expanduser())
+    except Exception:
+        pass
+
+    # 2) Repository-local directory next to this file
+    try:
+        repo_root = Path(__file__).resolve().parent
+        repo_chroma = repo_root / "chroma_db"
+        if repo_chroma.exists():
+            # Prefer repo path if it contains any files (i.e., a populated DB)
+            has_any = False
+            try:
+                next(repo_chroma.iterdir())
+                has_any = True
+            except StopIteration:
+                has_any = False
+            except Exception:
+                # If listing fails, be conservative and do not choose repo path
+                has_any = False
+            if has_any:
+                return str(repo_chroma)
+    except Exception:
+        pass
+
+    # 3) Fallback to appdata location
     return str(Path(get_appdata_base_dir()) / "chroma")
 
 
@@ -135,16 +169,20 @@ def create_embedding_function():
         print(f"[embeddings] Using backend='{backend}', model='{model}'")
         _embedding_factory_logged = True
 
+    # Lazy-import to avoid importing heavy deps (e.g., torch via sentence-transformers)
+    # during Streamlit startup/module scanning. This prevents watcher crashes.
+    from chromadb.utils import embedding_functions as _embedding_functions
+
     if backend == "openai":
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
             raise RuntimeError(
                 "OPENAI_API_KEY is required when EMBEDDING_BACKEND=openai. Set it in your environment or .env."
             )
-        return embedding_functions.OpenAIEmbeddingFunction(api_key=api_key, model_name=model)
+        return _embedding_functions.OpenAIEmbeddingFunction(api_key=api_key, model_name=model)
 
     # Default: sentence-transformers
-    return embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model)
+    return _embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model)
 
 
 def normalize_source_url(raw: str) -> str:

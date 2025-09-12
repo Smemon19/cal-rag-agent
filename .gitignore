@@ -121,4 +121,5 @@ docs/**/text/
 docs/**/report/
 
 # Local PDFs (keep versioned docs/** markdown, ignore raw PDFs)
-docs/pdfs/
+docs/pdfs/chroma_db.zip
+chroma_db/

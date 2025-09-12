@@ -1,3 +1,20 @@
+## Quick Build (Windows)
+
+Follow these steps to build the EXE and installer:
+
+1) Install Python 3.11, Git, and Inno Setup 6.
+2) Open PowerShell and run:
+
+```powershell
+cd <repo>
+./scripts/build_exe.ps1
+./scripts/build_installer.ps1
+```
+
+Share the generated installer at `installer\Output\CalRAGInstaller.exe`.
+
+---
+
 ## Cal RAG Agent – Windows Build & Installer Guide
 
 This guide explains how to build a single-file Windows app with PyInstaller and package it into a Windows installer (Inno Setup). The installer ships your pre-ingested ChromaDB as initial data and creates Start Menu/Desktop shortcuts.
