@@ -21,8 +21,15 @@ def get_appdata_base_dir() -> str:
     """Return the base writable application data directory for this app.
 
     - On Windows: %LOCALAPPDATA%\\CalRAG
+    - On Cloud Run: /tmp/.calrag (writable ephemeral storage)
     - On other OS: ~/.calrag
     """
+    # Prefer /tmp when running on Cloud Run (filesystem is read-only except /tmp)
+    try:
+        if os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN"):
+            return str(Path("/tmp") / ".calrag")
+    except Exception:
+        pass
     try:
         local_appdata = os.getenv("LOCALAPPDATA")
         if local_appdata:

@@ -22,7 +22,8 @@ from pydantic_ai.messages import (
 from utils import get_chroma_client, resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, get_default_chroma_dir
 
 ensure_appdata_scaffold()
-load_dotenv(dotenv_path=get_env_file_path(), override=True)
+# Load .env without overriding existing environment variables (Cloud Run env wins)
+load_dotenv(dotenv_path=get_env_file_path(), override=False)
 
 from rag_agent import get_agent, RAGDeps
 

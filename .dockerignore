@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+
+# Node
+node_modules/
+
+# Build/artefacts
+dist/
+build/
+.next/
+
+# VCS
+.git
+.gitignore
+
+# OS
+.DS_Store
+
+# Local databases or large assets not needed in image
+chroma_db/
+*.sqlite3
+*.db
+
+

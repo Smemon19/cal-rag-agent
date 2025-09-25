@@ -47,7 +47,8 @@ from verify import verify_answer
 
 # Ensure appdata scaffold and load .env from there so user config persists across updates
 ensure_appdata_scaffold()
-dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=True)
+# Load .env without overriding existing environment variables (Cloud Run env wins)
+dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=False)
 
 # Check for OpenAI API key
 if not os.getenv("OPENAI_API_KEY"):
