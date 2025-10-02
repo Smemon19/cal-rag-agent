@@ -1,0 +1,6 @@
+# Deprecated: superseded by root requirements.txt; do not use.
+pymupdf
+pillow
+pytesseract
+tiktoken
+

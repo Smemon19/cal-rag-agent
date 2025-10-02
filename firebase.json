@@ -5,13 +5,6 @@
       "firebase.json",
       "**/.*",
       "**/node_modules/**"
-    ],
-    "redirects": [
-      {
-        "source": "/:path*",
-        "destination": "https://calrag-app-975481572269.us-central1.run.app/:path",
-        "type": 302
-      }
     ]
   }
 }
