@@ -25,7 +25,6 @@ build/
 .DS_Store
 
 # Local databases or large assets not needed in image
-chroma_db/
 *.sqlite3
 *.db
 

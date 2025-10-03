@@ -11,9 +11,18 @@ import re
 from pathlib import Path
 
 import dotenv
-from pydantic_ai import RunContext
-from pydantic_ai.agent import Agent
-from openai import AsyncOpenAI
+# Guarded imports for pydantic_ai to tolerate version differences
+try:
+    from pydantic_ai.agent import Agent  # preferred path
+except Exception:
+    try:
+        from pydantic_ai import Agent  # fallback path
+    except Exception:
+        Agent = None  # type: ignore
+try:
+    from openai import AsyncOpenAI
+except Exception:
+    AsyncOpenAI = None  # type: ignore
 
 from utils import (
     get_chroma_client,
@@ -31,7 +40,8 @@ from utils import (
     get_env_file_path,
     ensure_appdata_scaffold,
     get_default_chroma_dir,
-    
+    sanitize_and_validate_openai_key,
+    get_key_diagnostics,
 )
 from utils_tables import parse_markdown_table, pick_underlayment
 import itertools
@@ -44,17 +54,32 @@ from tools_calc import (
 )
 from rules_loader import load_all_rules, find_rules_by_section, find_rules_by_keywords
 from verify import verify_answer
+import json as _json
+import uuid as _uuid
+from utils import increment_query_count
 
-# Ensure appdata scaffold and load .env from there so user config persists across updates
+# Ensure appdata scaffold; only load .env in local dev (not in container/App Hosting)
+# Default collection and repo DB directory unless CLI/env override
+try:
+    repo_chroma = str((Path(__file__).resolve().parent / "chroma_db").absolute())
+    if not os.getenv("CHROMA_DIR") and Path(repo_chroma).exists():
+        os.environ.setdefault("CHROMA_DIR", repo_chroma)
+except Exception:
+    pass
+os.environ.setdefault("RAG_COLLECTION_NAME", "docs_ibc_v2")
+
 ensure_appdata_scaffold()
-# Load .env without overriding existing environment variables (Cloud Run env wins)
-dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=False)
+if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
+    try:
+        dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=False)
+    except Exception:
+        pass
 
-# Check for OpenAI API key
-if not os.getenv("OPENAI_API_KEY"):
-    print("Error: OPENAI_API_KEY environment variable not set.")
-    print("Please create a .env file with your OpenAI API key or set it in your environment.")
-    sys.exit(1)
+# Defer strict API key validation to runtime callers (Streamlit UI or CLI).
+try:
+    sanitize_and_validate_openai_key()
+except Exception:
+    pass
 
 
 @dataclass
@@ -457,6 +482,10 @@ class RagAgent:
 # Create the RAG agent
 def create_agent():
     """Create the RAG agent with proper environment variable loading."""
+    if Agent is None:
+        raise ImportError(
+            "pydantic_ai is required to create the agent. Install it or avoid calling create_agent() at import time."
+        )
     return Agent(
         os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
         deps_type=RAGDeps,
@@ -494,8 +523,10 @@ def get_agent():
     
     return agent
 
+from typing import Any as _Any
+
 async def retrieve(
-    context: RunContext[RAGDeps],
+    context: _Any,
     search_query: str,
     n_results: int = 5,
     header_contains: Optional[str] = None,
@@ -511,7 +542,26 @@ async def retrieve(
     Returns:
         Formatted context information from the retrieved documents.
     """
-    # Get ChromaDB client and collection
+    # Guardrails and circuit breaker configuration
+    try:
+        max_n_results = max(1, int(str(os.getenv("RETRIEVAL_N_RESULTS", str(n_results))).strip()))
+    except Exception:
+        max_n_results = max(1, n_results)
+    try:
+        max_chunks_for_context = max(1, int(str(os.getenv("MAX_CHUNKS_FOR_CONTEXT", "12")).strip()))
+    except Exception:
+        max_chunks_for_context = 12
+    try:
+        max_context_tokens = max(256, int(str(os.getenv("MAX_CONTEXT_TOKENS", "6000")).strip()))
+    except Exception:
+        max_context_tokens = 6000
+
+    import time
+    start_time = time.time()
+    breaker_triggered = False
+    request_id = str(_uuid.uuid4())
+
+    # Get ChromaDB client and collection (reused via utils caches)
     collection = get_or_create_collection(
         context.deps.chroma_client,
         context.deps.collection_name,
@@ -740,7 +790,8 @@ async def retrieve(
     except Exception as e:
         print(f"[rules] Error during snippet injection: {e}")
 
-    # Vector query first
+    # Vector query first (bounded)
+    n_results = min(n_results, max_n_results)
     query_results = query_collection(collection, search_query, n_results=n_results)
 
     # Hybrid fallback for numeric/table/section queries
@@ -748,6 +799,12 @@ async def retrieve(
     kw_results = keyword_search_collection(collection, section_terms, max_results=max(3, n_results))
 
     # Merge vector and keyword hits (dedupe by id, prefer vector order)
+    # Apply candidate discipline: cap candidates before rerank/format
+    try:
+        candidate_cap_raw = os.getenv("VECTOR_CANDIDATE_CAP", "50")
+        candidate_cap = max(1, int(str(candidate_cap_raw).strip()))
+    except Exception:
+        candidate_cap = 50
     vec_ids = [*query_results.get("ids", [[]])[0]]
     vec_docs = [*query_results.get("documents", [[]])[0]]
     vec_metas = [*query_results.get("metadatas", [[]])[0]]
@@ -763,6 +820,22 @@ async def retrieve(
             vec_docs.append(kw_docs[i])
             vec_metas.append(kw_metas[i])
             seen.add(id_)
+
+    # Cap candidates feeding downstream steps
+    candidates_from_vector = len(vec_ids)
+    if len(vec_ids) > candidate_cap:
+        vec_ids = vec_ids[:candidate_cap]
+        vec_docs = vec_docs[:candidate_cap]
+        vec_metas = vec_metas[:candidate_cap]
+    try:
+        print({
+            "where": "retrieval",
+            "action": "candidate_cap",
+            "candidates_from_vector": candidates_from_vector,
+            "candidates_after_cap": len(vec_ids),
+        })
+    except Exception:
+        pass
 
     # Coalesce filter values: tool args override deps; treat blank/whitespace as None
     def _norm(s: Optional[str]) -> Optional[str]:
@@ -843,7 +916,102 @@ async def retrieve(
         }
     
     # Format the results as context (prepend rules and table lookup if available)
+    # Guard against huge contexts by limiting number of chunks
+    if len(query_results.get("documents", [[]])[0]) > max_chunks_for_context:
+        # Trim
+        query_results = {
+            "ids": [query_results["ids"][0][:max_chunks_for_context]],
+            "documents": [query_results["documents"][0][:max_chunks_for_context]],
+            "metadatas": [query_results["metadatas"][0][:max_chunks_for_context]],
+            "distances": [query_results.get("distances", [[0.0]])[0][:max_chunks_for_context]],
+        }
+    # Optional dedup by (source_url, page_number)
+    docs = query_results.get("documents", [[]])[0]
+    metas = query_results.get("metadatas", [[]])[0]
+    seen_pairs = set()
+    dedup_docs: List[str] = []
+    dedup_metas: List[Dict[str, Any]] = []
+    for d, m in zip(docs, metas):
+        key = (str((m or {}).get("source_url", "")), str((m or {}).get("page_number", "")))
+        if key not in seen_pairs:
+            seen_pairs.add(key)
+            dedup_docs.append(d)
+            dedup_metas.append(m)
+    deduped_count = len(docs) - len(dedup_docs)
+    query_results = {
+        "ids": [query_results.get("ids", [[]])[0][:len(dedup_docs)]],
+        "documents": [dedup_docs],
+        "metadatas": [dedup_metas],
+        "distances": [query_results.get("distances", [[0.0]])[0][:len(dedup_docs)]],
+    }
     base_ctx = format_results_as_context(query_results)
+
+    # Rough token estimate (~4 chars per token)
+    # Trim overly long individual chunks prior to token cap to reduce spikes
+    try:
+        per_chunk_char_limit_raw = os.getenv("PER_CHUNK_CHAR_LIMIT", "4000")
+        per_chunk_char_limit = max(500, int(str(per_chunk_char_limit_raw).strip()))
+    except Exception:
+        per_chunk_char_limit = 4000
+    trimmed_chunks_count = 0
+    if any(len(d or "") > per_chunk_char_limit for d in dedup_docs):
+        trimmed_docs = []
+        for d in dedup_docs:
+            if len(d or "") > per_chunk_char_limit:
+                trimmed_docs.append((d or "")[:per_chunk_char_limit])
+                trimmed_chunks_count += 1
+            else:
+                trimmed_docs.append(d)
+        query_results["documents"] = [trimmed_docs]
+        base_ctx = format_results_as_context(query_results)
+
+    est_tokens = max(1, len(base_ctx) // 4)
+    if est_tokens > max_context_tokens:
+        breaker_triggered = True
+        elapsed = time.time() - start_time
+        try:
+            print({
+                "where": "retrieval",
+                "action": "circuit_breaker",
+                "n_results_requested": n_results,
+                "n_results_returned": len(query_results.get("documents", [[]])[0]),
+                "chunks_used": len(query_results.get("documents", [[]])[0]),
+                "tokens_in_context": est_tokens,
+                "circuit_breaker_triggered": True,
+                "elapsed_sec": round(elapsed, 3),
+            })
+        except Exception:
+            pass
+        # Per-request structured log without PII
+        try:
+            print(_json.dumps({
+                "ts": time.time(),
+                "request_id": request_id,
+                "elapsed_ms": int(elapsed * 1000),
+                "query_chars": len(search_query or ""),
+                "embed_cache_hit": None,  # unknown here
+                "embed_batches": None,
+                "batch_size": None,
+                "prefilter_count": None,
+                "prefilter_limit": os.getenv("KEYWORD_PREFILTER_LIMIT", ""),
+                "prefilter_fallback": None,
+                "n_results_requested": n_results,
+                "n_results_returned": len(query_results.get("documents", [[]])[0]),
+                "candidates_from_vector": None,
+                "candidates_after_cap": None,
+                "deduped_count": None,
+                "trimmed_chunks_count": None,
+                "chunks_used": len(query_results.get("documents", [[]])[0]),
+                "tokens_in_context": est_tokens,
+                "circuit_breaker_triggered": True,
+                "errors": "context_limit",
+            }))
+        except Exception:
+            pass
+        return (
+            "Your request would exceed our current context limits."
+            " Please narrow the question or specify a section/table so I can retrieve fewer chunks."
+        )
     prefix = ""
     if rules_prefix_context:
         prefix += rules_prefix_context
@@ -853,6 +1021,49 @@ async def retrieve(
     # Stash for verification step
     global _last_retrieve_context
     _last_retrieve_context = final_ctx
+    elapsed = time.time() - start_time
+    try:
+        print({
+            "where": "retrieval",
+            "action": "stats",
+            "n_results_requested": n_results,
+            "n_results_returned": len(query_results.get("documents", [[]])[0]),
+            "chunks_used": len(query_results.get("documents", [[]])[0]),
+            "tokens_in_context": est_tokens,
+            "circuit_breaker_triggered": breaker_triggered,
+            "elapsed_sec": round(elapsed, 3),
+            "deduped_count": deduped_count,
+            "trimmed_chunks_count": trimmed_chunks_count,
+        })
+    except Exception:
+        pass
+    # Per-request structured log without PII
+    try:
+        print(_json.dumps({
+            "ts": time.time(),
+            "request_id": request_id,
+            "elapsed_ms": int(elapsed * 1000),
+            "query_chars": len(search_query or ""),
+            "embed_cache_hit": None,
+            "embed_batches": None,
+            "batch_size": None,
+            "prefilter_count": None,
+            "prefilter_limit": os.getenv("KEYWORD_PREFILTER_LIMIT", ""),
+            "prefilter_fallback": None,
+            "n_results_requested": n_results,
+            "n_results_returned": len(query_results.get("documents", [[]])[0]),
+            "candidates_from_vector": candidates_from_vector,
+            "candidates_after_cap": len(query_results.get("documents", [[]])[0]),
+            "deduped_count": deduped_count,
+            "trimmed_chunks_count": trimmed_chunks_count,
+            "chunks_used": len(query_results.get("documents", [[]])[0]),
+            "tokens_in_context": est_tokens,
+            "circuit_breaker_triggered": breaker_triggered,
+            "errors": None,
+        }))
+    except Exception:
+        pass
+    increment_query_count()
     return final_ctx
 
 
