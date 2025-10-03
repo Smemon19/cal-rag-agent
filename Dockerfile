@@ -25,19 +25,10 @@ WORKDIR /app
 
 # Install Python dependencies first for better layer caching
 COPY requirements.txt /app/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Bake the embedding model into the image to avoid runtime downloads
-RUN python - <<'PY'
-from sentence_transformers import SentenceTransformer
-import os
-model_name = "sentence-transformers/all-MiniLM-L6-v2"
-target_dir = os.environ.get("HF_HOME", "/app/models")
-os.makedirs(target_dir, exist_ok=True)
-# Download to cache at target_dir by setting envs above
-_ = SentenceTransformer(model_name)
-print("Model baked at:", target_dir)
-PY
+# Upgrade pip tooling and preinstall binary wheels for numpy/pandas to avoid build toolchains
+RUN pip install --upgrade pip setuptools wheel \
+    && pip install --only-binary=:all: numpy==1.26.4 pandas==2.2.2 \
+    && pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the app
 COPY . /app
@@ -45,8 +36,8 @@ COPY . /app
 # Cloud Run will send traffic to this port
 EXPOSE 8080
 
-# Start Streamlit app (headless, bind to 0.0.0.0:8080)
+# Start Streamlit app (headless, bind to 0.0.0.0 and honor PORT)
 ENV STREAMLIT_SERVER_HEADLESS=true
-CMD ["streamlit", "run", "streamlit_app.py", "--server.port", "8080", "--server.address", "0.0.0.0", "--server.headless", "true", "--server.enableCORS", "false", "--server.enableXsrfProtection", "false"]
+CMD ["sh", "-c", "exec streamlit run streamlit_app.py --server.port ${PORT:-8080} --server.address 0.0.0.0 --server.headless true --server.enableCORS false --server.enableXsrfProtection false"]
 
 

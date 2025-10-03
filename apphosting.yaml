@@ -16,6 +16,8 @@ backends:
         MODEL_CHOICE: gpt-4.1-mini
         EMBEDDING_BACKEND: sentence
         RAG_COLLECTION_NAME: docs_ibc_v2
+        CHROMA_DIR: /tmp/.calrag/chroma
+        FIREBASE_APP_HOSTING: "true"
       # Bind OPENAI_API_KEY at deploy-time via Firebase secrets or protected envs.
       # Example (CLI or Console): OPENAI_API_KEY → runtime secret (not committed)
     ingress: public

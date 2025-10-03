@@ -11,9 +11,18 @@ import re
 from pathlib import Path
 
 import dotenv
-from pydantic_ai import RunContext
-from pydantic_ai.agent import Agent
-from openai import AsyncOpenAI
+# Guarded imports for pydantic_ai to tolerate version differences
+try:
+    from pydantic_ai.agent import Agent  # preferred path
+except Exception:
+    try:
+        from pydantic_ai import Agent  # fallback path
+    except Exception:
+        Agent = None  # type: ignore
+try:
+    from openai import AsyncOpenAI
+except Exception:
+    AsyncOpenAI = None  # type: ignore
 
 from utils import (
     get_chroma_client,
@@ -50,6 +59,15 @@ import uuid as _uuid
 from utils import increment_query_count
 
 # Ensure appdata scaffold; only load .env in local dev (not in container/App Hosting)
+# Default collection and repo DB directory unless CLI/env override
+try:
+    repo_chroma = str((Path(__file__).resolve().parent / "chroma_db").absolute())
+    if not os.getenv("CHROMA_DIR") and Path(repo_chroma).exists():
+        os.environ.setdefault("CHROMA_DIR", repo_chroma)
+except Exception:
+    pass
+os.environ.setdefault("RAG_COLLECTION_NAME", "docs_ibc_v2")
+
 ensure_appdata_scaffold()
 if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
     try:
@@ -57,13 +75,11 @@ if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FI
     except Exception:
         pass
 
-sanitize_and_validate_openai_key()
-
-# Validate key; fail fast without exposing secrets
-_kd = get_key_diagnostics()
-if not _kd.get("valid"):
-    print("Error: OPENAI_API_KEY invalid or missing (prefix check).")
-    sys.exit(1)
+# Defer strict API key validation to runtime callers (Streamlit UI or CLI).
+try:
+    sanitize_and_validate_openai_key()
+except Exception:
+    pass
 
 
 @dataclass
@@ -466,6 +482,10 @@ class RagAgent:
 # Create the RAG agent
 def create_agent():
     """Create the RAG agent with proper environment variable loading."""
+    if Agent is None:
+        raise ImportError(
+            "pydantic_ai is required to create the agent. Install it or avoid calling create_agent() at import time."
+        )
     return Agent(
         os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
         deps_type=RAGDeps,
@@ -503,8 +523,10 @@ def get_agent():
     
     return agent
 
+from typing import Any as _Any
+
 async def retrieve(
-    context: RunContext[RAGDeps],
+    context: _Any,
     search_query: str,
     n_results: int = 5,
     header_contains: Optional[str] = None,

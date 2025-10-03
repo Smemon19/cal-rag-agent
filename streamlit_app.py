@@ -2,21 +2,15 @@ import streamlit as st
 import asyncio
 import os
 from pathlib import Path
+import shutil
+import time
 
-# Import all the message part classes
-from pydantic_ai.messages import (
-    ModelMessage,
-    ModelRequest,
-    ModelResponse,
-    SystemPromptPart,
-    UserPromptPart,
-    TextPart,
-    ToolCallPart,
-    ToolReturnPart,
-    RetryPromptPart,
-    ModelMessagesTypeAdapter
-)
-from pydantic_ai.exceptions import ModelHTTPError
+# Guarded import for model HTTP errors; fallback to generic Exception
+try:
+    from pydantic_ai.exceptions import ModelHTTPError  # type: ignore
+except Exception:  # pragma: no cover - fallback for older/newer versions
+    class ModelHTTPError(Exception):
+        pass
 
 # Resolve and load .env from writable AppData directory; create scaffold on first run
 from utils import get_chroma_client, resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, get_default_chroma_dir, resolve_collection_name
@@ -25,7 +19,92 @@ from utils import get_process_uptime_seconds, get_memory_usage_mb, get_query_cou
 from utils import sanitize_and_validate_openai_key, get_key_diagnostics, compute_embedding_fingerprint
 from utils import increment_query_count
 
+# Force sane defaults: prefer writable /tmp target unless explicitly overridden
+try:
+    default_tmp_chroma = str(Path("/tmp") / ".calrag" / "chroma")
+    if not os.getenv("CHROMA_DIR"):
+        os.environ.setdefault("CHROMA_DIR", default_tmp_chroma)
+except Exception:
+    pass
+os.environ.setdefault("RAG_COLLECTION_NAME", "docs_ibc_v2")
+
 ensure_appdata_scaffold()
+
+# Mirror baked repo chroma_db to writable target on cold start with lock + sentinel
+def _mirror_repo_chroma_to_writable_target() -> None:
+    try:
+        repo_dir = Path(__file__).resolve().parent / "chroma_db"
+        target_dir = Path(os.getenv("CHROMA_DIR", str(Path("/tmp") / ".calrag" / "chroma")))
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        sentinel = target_dir / ".ready"
+        if sentinel.exists():
+            return
+
+        lock_file = target_dir / ".init.lock"
+        have_lock = False
+        t0 = time.time()
+        # Count source files best-effort
+        try:
+            src_files = sum(1 for p in repo_dir.rglob("*") if p.is_file()) if repo_dir.exists() else 0
+        except Exception:
+            src_files = -1
+        try:
+            # Attempt exclusive lock file creation
+            with open(lock_file, "x") as f:
+                f.write(str(os.getpid()))
+            have_lock = True
+        except FileExistsError:
+            # Another process may be initializing; wait briefly for readiness
+            for _ in range(50):  # ~5s max
+                if sentinel.exists():
+                    return
+                time.sleep(0.1)
+            # Timed out waiting; do a last-chance check and return regardless to avoid duplicate heavy copy
+            if sentinel.exists():
+                return
+            return
+
+        # Determine if destination is effectively empty (ignoring lock/sentinel)
+        is_empty = True
+        try:
+            for entry in target_dir.iterdir():
+                if entry.name not in {".init.lock", ".ready"}:
+                    is_empty = False
+                    break
+        except Exception:
+            is_empty = True
+
+        # Copy only if we have a source and destination is empty
+        if is_empty and repo_dir.exists() and repo_dir.is_dir():
+            shutil.copytree(repo_dir, target_dir, dirs_exist_ok=True)
+
+        # Drop sentinel to indicate readiness
+        try:
+            sentinel.write_text("ok", encoding="utf-8")
+        except Exception:
+            # Do not fail startup if sentinel cannot be written
+            pass
+        # Log a concise mirror summary once
+        try:
+            dest_files = sum(1 for p in target_dir.rglob("*") if p.is_file())
+        except Exception:
+            dest_files = -1
+        elapsed_ms = int((time.time() - t0) * 1000)
+        print(f"[chroma-mirror] src_files={src_files} dest_files={dest_files} elapsed_ms={elapsed_ms}")
+    except Exception:
+        # Best-effort; avoid blocking startup
+        pass
+    finally:
+        try:
+            if (target_dir := Path(os.getenv("CHROMA_DIR", str(Path("/tmp") / ".calrag" / "chroma")))).exists():
+                lock_path = target_dir / ".init.lock"
+                if lock_path.exists():
+                    lock_path.unlink(missing_ok=True)  # type: ignore[arg-type]
+        except Exception:
+            pass
+
+_mirror_repo_chroma_to_writable_target()
 # Do not load .env in container runtime; rely on App Hosting/Cloud env
 if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
     try:
@@ -42,9 +121,10 @@ from rag_agent import get_agent, RAGDeps
 def _get_cached_chroma_client():
     return get_chroma_client(get_default_chroma_dir())
 
-# Sanitize and validate key once at startup
+# Sanitize and validate key once at startup (lightweight)
 sanitize_and_validate_openai_key()
-_fingerprint = compute_embedding_fingerprint()
+# Defer computing embedding fingerprint (heavy imports) until diagnostics render
+_fingerprint: dict = {}
 
 # In container runtimes, fail fast if key invalid and prewarm embeddings before readiness
 if (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
@@ -73,6 +153,29 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
         header_contains=(header_contains or None),
         source_contains=(source_contains or None),
     )
+
+
+def _chroma_diag() -> dict:
+    """Return diagnostics for writable Chroma mirror."""
+    try:
+        target_dir = Path(os.getenv("CHROMA_DIR", str(Path("/tmp") / ".calrag" / "chroma")))
+        sentinel = target_dir / ".ready"
+        try:
+            file_count = sum(1 for p in target_dir.rglob("*") if p.is_file())
+        except Exception:
+            file_count = -1
+        try:
+            total_bytes = sum(p.stat().st_size for p in target_dir.rglob("*") if p.is_file())
+        except Exception:
+            total_bytes = -1
+        return {
+            "CHROMA_DIR": str(target_dir),
+            "ready": sentinel.exists(),
+            "file_count": file_count,
+            "total_bytes": total_bytes,
+        }
+    except Exception:
+        return {"CHROMA_DIR": os.getenv("CHROMA_DIR", ""), "ready": False, "file_count": -1, "total_bytes": -1}
 
 
 def _api_key_diag() -> dict:
@@ -147,6 +250,15 @@ async def run_agent_with_streaming(user_input):
 async def main():
     st.title("CAL AI Agent")
 
+    # Lightweight health probe: return quickly when ?healthz=1
+    try:
+        params = st.experimental_get_query_params()
+        if params.get("healthz") == ["1"]:
+            st.write("ok")
+            return
+    except Exception:
+        pass
+
     # Gate readiness: fail fast in UI if key invalid; warmup embeddings
     key_diag = get_key_diagnostics()
     if not key_diag.get("valid"):
@@ -192,12 +304,11 @@ async def main():
             f"Filters: header='{st.session_state.header_contains or ''}', source='{st.session_state.source_contains or ''}'"
         )
 
-    # Display all messages from the conversation so far
-    # Each message is either a ModelRequest or ModelResponse.
-    # We iterate over their parts to decide how to display them.
+    # Display all messages from the conversation so far by duck-typing message objects
     for msg in st.session_state.messages:
-        if isinstance(msg, ModelRequest) or isinstance(msg, ModelResponse):
-            for part in msg.parts:
+        parts = getattr(msg, "parts", None)
+        if parts:
+            for part in parts:
                 display_message_part(part)
 
     # Chat input for the user
@@ -246,11 +357,22 @@ async def main():
 
     # Diagnostics panel
     with st.sidebar.expander("Diagnostics", expanded=False):
+        # Quick health surface
+        try:
+            st.caption("Health")
+            st.code(str({
+                "OPENAI_API_KEY_set": bool(os.getenv("OPENAI_API_KEY")),
+            }))
+        except Exception:
+            pass
         st.caption("Initialization & cache status")
         vs_status = _LAST_VECTOR_STORE_STATUS or {}
         emb_stats = get_embedding_cache_stats()
         backend, model = resolve_embedding_backend_and_model()
-        fp = _fingerprint
+        try:
+            fp = compute_embedding_fingerprint()
+        except Exception:
+            fp = _fingerprint or {}
         st.code(str({
             "uptime_sec": get_process_uptime_seconds(),
             "memory_mb": get_memory_usage_mb(),
@@ -262,6 +384,7 @@ async def main():
                 "collection": vs_status.get("collection_name"),
             },
             "embedding_cache": emb_stats,
+            "chroma_mirror": _chroma_diag(),
             "api_key": _api_key_diag(),
             "model_choice": os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
             "embedding_backend": backend,
