@@ -109,7 +109,12 @@ _mirror_repo_chroma_to_writable_target()
 if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
     try:
         from dotenv import load_dotenv  # local dev only
-        load_dotenv(dotenv_path=get_env_file_path(), override=False)
+        # Try repo .env first, then fall back to appdata .env
+        repo_env = Path(__file__).resolve().parent / ".env"
+        if repo_env.exists():
+            load_dotenv(dotenv_path=repo_env, override=False)
+        else:
+            load_dotenv(dotenv_path=get_env_file_path(), override=False)
     except Exception:
         pass
 
@@ -170,9 +175,18 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
     emb_backend, emb_model = resolve_embedding_backend_and_model()
     st.sidebar.caption(f"Embeddings: {emb_backend} / {emb_model}")
 
+    # Get collection name based on backend
+    if backend_name == "chroma":
+        resolved_collection = resolve_collection_name(None)
+        collection_name = resolved_collection
+    else:
+        collection_name = "docs_ibc_v2"  # BigQuery uses table name instead
+
     return RAGDeps(
         vector_store=_get_cached_vector_store(),
         embedding_model="all-MiniLM-L6-v2",
+        collection_name=collection_name,
+        vector_backend=backend_name,
         header_contains=(header_contains or None),
         source_contains=(source_contains or None),
     )
@@ -346,15 +360,16 @@ async def main():
         with st.sidebar.expander("Diagnostics", expanded=True):
             st.code(str({"api_key": _api_key_diag()}))
         st.stop()
-    # Prewarm embeddings on first render
+    # Prewarm embeddings on first render (graceful failure - app can continue)
     try:
         # Touch embedding function to ensure model is loaded
         from utils import create_embedding_function
         fn = create_embedding_function()
         _ = fn(["warmup"])
     except Exception as e:
-        st.sidebar.error("Embedding warmup failed; see logs.")
-        st.stop()
+        # Log warning but don't stop - embeddings will be loaded on first query
+        st.sidebar.warning("⚠️ Embedding warmup skipped. Models will load on first query.")
+        print(f"[embeddings] Warmup failed (non-fatal): {e}")
 
     # Initialize chat history in session state if not present
     if "messages" not in st.session_state:
@@ -427,7 +442,7 @@ async def main():
                             "present": diag.get("present"),
                             "length": diag.get("length"),
                             "looks_prefixed": diag.get("looks_prefixed"),
-                            "model": os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
+                            "model": os.getenv("MODEL_CHOICE", "gpt-4o-mini"),
                         }))
                 else:
                     message_placeholder.markdown("An error occurred while contacting the model.")
@@ -469,7 +484,7 @@ async def main():
             "vector_store_backend": vs_diag,
             "embedding_cache": emb_stats,
             "api_key": _api_key_diag(),
-            "model_choice": os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
+            "model_choice": os.getenv("MODEL_CHOICE", "gpt-4o-mini"),
             "embedding_backend": backend,
             "embedding_model": model,
             "embedding_fingerprint": fp,

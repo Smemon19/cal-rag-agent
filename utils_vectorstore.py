@@ -127,8 +127,6 @@ class ChromaVectorStore(VectorStore):
         filters: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Perform vector similarity search using ChromaDB."""
-        from utils import query_collection
-
         # Convert filters to Chroma's where clause format if needed
         where = None
         if filters:
@@ -136,12 +134,12 @@ class ChromaVectorStore(VectorStore):
             # for now to maintain compatibility
             pass
 
-        # Query the collection
-        results = query_collection(
-            self.collection,
-            query_text="",  # We're providing embeddings directly
+        # Query the collection using embeddings directly
+        results = self.collection.query(
+            query_embeddings=[query_embedding],
             n_results=n_results,
             where=where,
+            include=["documents", "metadatas", "distances"]
         )
 
         # If we have filters, apply them post-query
@@ -299,12 +297,34 @@ class BigQueryVectorStore(VectorStore):
             project: BigQuery project ID
             dataset: BigQuery dataset ID
             table: BigQuery table name
+
+        Raises:
+            RuntimeError: If BigQuery client cannot be initialized (e.g., missing credentials)
         """
-        from utils_bigquery import get_bq_project, get_bq_dataset, get_bq_table
+        from utils_bigquery import get_bq_project, get_bq_dataset, get_bq_table, get_bq_client
 
         self.project = project or get_bq_project()
         self.dataset = dataset or get_bq_dataset()
         self.table = table or get_bq_table()
+
+        # Validate BigQuery connection early
+        try:
+            # Try to create a client to validate credentials
+            _ = get_bq_client(project=self.project)
+        except Exception as e:
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            error_msg = (
+                f"Failed to initialize BigQuery client: {e}\n"
+                f"GOOGLE_APPLICATION_CREDENTIALS: {creds_path or '(not set)'}\n"
+                f"Ensure credentials are configured or use VECTOR_BACKEND=chroma"
+            )
+            print(json.dumps({
+                "where": "bigquery_vector_store",
+                "action": "init_error",
+                "error": str(e),
+                "creds_path": creds_path,
+            }))
+            raise RuntimeError(error_msg) from e
 
     def vector_search(
         self,
@@ -473,7 +493,18 @@ def get_vector_store(
     }))
 
     if backend_name == "bigquery":
-        return BigQueryVectorStore(**kwargs)
+        try:
+            return BigQueryVectorStore(**kwargs)
+        except (RuntimeError, ValueError, Exception) as e:
+            # Graceful fallback to Chroma if BigQuery fails
+            print(json.dumps({
+                "where": "vector_store_factory",
+                "action": "bigquery_fallback_to_chroma",
+                "error": str(e),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }))
+            print(f"Warning: BigQuery initialization failed, falling back to Chroma: {e}")
+            return ChromaVectorStore(**kwargs)
     elif backend_name == "chroma":
         return ChromaVectorStore(**kwargs)
     else:
