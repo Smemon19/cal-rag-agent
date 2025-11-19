@@ -13,11 +13,11 @@ except Exception:  # pragma: no cover - fallback for older/newer versions
         pass
 
 # Resolve and load .env from writable AppData directory; create scaffold on first run
-from utils import get_chroma_client, resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, get_default_chroma_dir, resolve_collection_name
-from utils import _LAST_VECTOR_STORE_STATUS
+from utils import resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, get_default_chroma_dir, resolve_collection_name
 from utils import get_process_uptime_seconds, get_memory_usage_mb, get_query_count, get_embedding_cache_stats
 from utils import sanitize_and_validate_openai_key, get_key_diagnostics, compute_embedding_fingerprint
 from utils import increment_query_count
+from utils_vectorstore import get_vector_store, resolve_vector_backend
 
 # Force sane defaults: prefer writable /tmp target unless explicitly overridden
 try:
@@ -116,10 +116,22 @@ if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FI
 from rag_agent import get_agent, RAGDeps
 
 
-# Cache a single Chroma client per process to avoid heavy reinitialization on rerenders
+# Cache a single vector store instance per process to avoid heavy reinitialization on rerenders
 @st.cache_resource(show_spinner=False)
-def _get_cached_chroma_client():
-    return get_chroma_client(get_default_chroma_dir())
+def _get_cached_vector_store():
+    """Get or create cached vector store instance."""
+    backend_name, backend_config = resolve_vector_backend()
+
+    if backend_name == "bigquery":
+        return get_vector_store(backend="bigquery")
+    else:
+        # Default to Chroma
+        resolved_collection = resolve_collection_name(None)
+        return get_vector_store(
+            backend="chroma",
+            persist_directory=get_default_chroma_dir(),
+            collection_name=resolved_collection,
+        )
 
 # Sanitize and validate key once at startup (lightweight)
 sanitize_and_validate_openai_key()
@@ -139,16 +151,27 @@ if (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBA
         raise SystemExit(1)
 
 async def get_agent_deps(header_contains: str | None, source_contains: str | None):
-    resolved_collection = resolve_collection_name(None)
-    # Log once on startup via Streamlit status text and server log
-    print(f"[ui] Using ChromaDB collection: '{resolved_collection}'")
-    st.sidebar.caption(f"Active collection: {resolved_collection}")
-    backend, model = resolve_embedding_backend_and_model()
-    # Also display embeddings info once
-    st.sidebar.caption(f"Embeddings: {backend} / {model}")
+    """Create agent dependencies with configured vector store."""
+    # Get vector store backend information
+    backend_name, backend_config = resolve_vector_backend()
+
+    # Log backend information
+    print(f"[ui] Using vector backend: '{backend_name}'")
+    st.sidebar.caption(f"Vector backend: {backend_name}")
+
+    if backend_name == "chroma":
+        resolved_collection = resolve_collection_name(None)
+        st.sidebar.caption(f"Collection: {resolved_collection}")
+    elif backend_name == "bigquery":
+        st.sidebar.caption(f"Project: {backend_config.get('project', 'N/A')}")
+        st.sidebar.caption(f"Dataset: {backend_config.get('dataset', 'N/A')}")
+
+    # Display embeddings info
+    emb_backend, emb_model = resolve_embedding_backend_and_model()
+    st.sidebar.caption(f"Embeddings: {emb_backend} / {emb_model}")
+
     return RAGDeps(
-        chroma_client=_get_cached_chroma_client(),
-        collection_name=resolved_collection,
+        vector_store=_get_cached_vector_store(),
         embedding_model="all-MiniLM-L6-v2",
         header_contains=(header_contains or None),
         source_contains=(source_contains or None),
@@ -176,6 +199,54 @@ def _chroma_diag() -> dict:
         }
     except Exception:
         return {"CHROMA_DIR": os.getenv("CHROMA_DIR", ""), "ready": False, "file_count": -1, "total_bytes": -1}
+
+
+def _vector_store_diag() -> dict:
+    """Return diagnostics for the active vector store (Chroma or BigQuery)."""
+    try:
+        vector_store = _get_cached_vector_store()
+        backend_name, backend_config = resolve_vector_backend()
+
+        # Get common info from vector store
+        info = vector_store.get_info()
+        doc_count = vector_store.count_documents()
+
+        result = {
+            "backend": backend_name,
+            "document_count": doc_count,
+        }
+
+        if backend_name == "bigquery":
+            # BigQuery-specific diagnostics
+            result.update({
+                "project": info.get("project", "N/A"),
+                "dataset": info.get("dataset", "N/A"),
+                "table": info.get("table", "N/A"),
+                "table_size_bytes": info.get("table_size_bytes", 0),
+                "indexes": info.get("indexes", []),
+                "created": info.get("created", "N/A"),
+                "modified": info.get("modified", "N/A"),
+            })
+        else:
+            # Chroma-specific diagnostics
+            chroma_diag = _chroma_diag()
+            result.update({
+                "collection_name": info.get("collection_name", "N/A"),
+                "persist_directory": info.get("persist_directory", "N/A"),
+                "distance_function": info.get("distance_function", "cosine"),
+                "chroma_dir_ready": chroma_diag.get("ready", False),
+                "chroma_file_count": chroma_diag.get("file_count", -1),
+                "chroma_total_bytes": chroma_diag.get("total_bytes", -1),
+            })
+
+        return result
+
+    except Exception as e:
+        return {
+            "backend": "unknown",
+            "error": str(e),
+            "document_count": 0,
+        }
 
 
 def _api_key_diag() -> dict:
