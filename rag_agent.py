@@ -1,4 +1,4 @@
-"""Pydantic AI agent that leverages RAG with a local ChromaDB for Pydantic documentation."""
+"""Pydantic AI agent that leverages RAG with vector stores (ChromaDB or BigQuery)."""
 
 import os
 import sys
@@ -6,7 +6,6 @@ import argparse
 from dataclasses import dataclass
 from typing import Optional, List, Dict, Any
 import asyncio
-import chromadb
 import re
 from pathlib import Path
 
@@ -25,14 +24,6 @@ except Exception:
     AsyncOpenAI = None  # type: ignore
 
 from utils import (
-    get_chroma_client,
-    get_or_create_collection,
-    query_collection,
-    format_results_as_context,
-    add_documents_to_collection,
-    keyword_search_collection,
-    build_section_search_terms,
-    resolve_collection_name,
     resolve_embedding_backend_and_model,
     normalize_source_url,
     build_section_path,
@@ -42,7 +33,11 @@ from utils import (
     get_default_chroma_dir,
     sanitize_and_validate_openai_key,
     get_key_diagnostics,
+    format_results_as_context,
+    build_section_search_terms,
+    resolve_collection_name,
 )
+from utils_vectorstore import get_vector_store, resolve_vector_backend, VectorStore
 from utils_tables import parse_markdown_table, pick_underlayment
 import itertools
 from tools_calc import (
@@ -85,8 +80,7 @@ except Exception:
 @dataclass
 class RAGDeps:
     """Dependencies for the RAG agent."""
-    chroma_client: chromadb.PersistentClient
-    collection_name: str
+    vector_store: VectorStore
     embedding_model: str
     header_contains: Optional[str] = None
     source_contains: Optional[str] = None
@@ -94,23 +88,37 @@ class RAGDeps:
 
 class RagAgent:
     """RAG Agent for handling document insertion from URLs and local files."""
-    
-    def __init__(self, collection_name: Optional[str] = None, db_directory: str = "", 
+
+    def __init__(self, collection_name: Optional[str] = None, db_directory: str = "",
                  embedding_model: str = "all-MiniLM-L6-v2"):
         # Resolve collection name with precedence: CLI > env > default
         resolved_collection = resolve_collection_name(collection_name)
         self.collection_name = resolved_collection
         self.db_directory = db_directory or get_default_chroma_dir()
         self.embedding_model = embedding_model
-        self.client = get_chroma_client(db_directory)
+
+        # Resolve vector backend and create appropriate store
+        backend_name, backend_config = resolve_vector_backend()
+        print(f"[agent] Vector backend: '{backend_name}'")
+
         # Log which embedding backend/model are active once during agent init
-        backend, model = resolve_embedding_backend_and_model()
-        print(f"[agent] Embeddings backend='{backend}', model='{model}'")
-        self.collection = get_or_create_collection(
-            self.client, 
-            resolved_collection, 
-            embedding_model_name=embedding_model
-        )
+        emb_backend, emb_model = resolve_embedding_backend_and_model()
+        print(f"[agent] Embeddings backend='{emb_backend}', model='{emb_model}'")
+
+        # Create vector store based on backend
+        if backend_name == "bigquery":
+            self.vector_store = get_vector_store(backend="bigquery")
+        else:
+            # Default to Chroma
+            self.vector_store = get_vector_store(
+                backend="chroma",
+                persist_directory=self.db_directory,
+                collection_name=resolved_collection,
+            )
+            # For backward compatibility, keep these references for Chroma-based code
+            if hasattr(self.vector_store, 'client'):
+                self.client = self.vector_store.client
+                self.collection = self.vector_store.collection
     
     def smart_chunk_markdown(self, markdown: str, max_len: int = 1000, overlap_chars: int = 150) -> List[str]:
         """Hierarchically split markdown by headers, then by characters with small overlap.
@@ -430,35 +438,47 @@ class RagAgent:
             print("No documents found to insert.")
             return
 
-        # Deduplicate by chunk_id against existing collection
-        from utils import get_existing_ids
-        existing = get_existing_ids(self.collection, ids)
-        keep_indices = [i for i, cid in enumerate(ids) if cid not in existing]
-        if not keep_indices:
-            print(f"[ingest] All {len(ids)} chunks already exist; skipping insert.")
-        else:
-            ids_new = [ids[i] for i in keep_indices]
-            docs_new = [documents[i] for i in keep_indices]
-            metas_new = [metadatas[i] for i in keep_indices]
+        # Check if vector store supports upsert (BigQuery does not support real-time upserts)
+        try:
+            # Deduplicate by chunk_id against existing collection
+            existing_result = self.vector_store.get_by_ids(ids)
+            existing = set(existing_result.get("ids", []))
+            keep_indices = [i for i, cid in enumerate(ids) if cid not in existing]
 
-            print(f"Inserting {len(docs_new)} chunks into ChromaDB collection '{self.collection_name}' (skipped {len(ids)-len(keep_indices)} duplicates)...")
+            if not keep_indices:
+                print(f"[ingest] All {len(ids)} chunks already exist; skipping insert.")
+            else:
+                ids_new = [ids[i] for i in keep_indices]
+                docs_new = [documents[i] for i in keep_indices]
+                metas_new = [metadatas[i] for i in keep_indices]
 
-            add_documents_to_collection(
-                self.collection,
-                ids_new,
-                docs_new,
-                metas_new,
-                batch_size=batch_size
-            )
+                print(f"Inserting {len(docs_new)} chunks into vector store '{self.collection_name}' (skipped {len(ids)-len(keep_indices)} duplicates)...")
 
-            print(f"Successfully added {len(docs_new)} chunks to ChromaDB collection '{self.collection_name}'.")
+                self.vector_store.upsert(
+                    ids=ids_new,
+                    documents=docs_new,
+                    metadatas=metas_new,
+                    batch_size=batch_size
+                )
 
-        # Per-source summary logs
-        for src, cids in per_source_ids.items():
-            stype = 'web' if src.startswith('http') else ('pdf' if src.endswith('.pdf') else 'file')
-            inserted = sum(1 for cid in cids if cid not in existing)
-            skipped = len(cids) - inserted
-            print(f"[ingest] source_type={stype} url={src} inserted={inserted} skipped_duplicates={skipped}")
+                print(f"Successfully added {len(docs_new)} chunks to vector store '{self.collection_name}'.")
+
+            # Per-source summary logs
+            for src, cids in per_source_ids.items():
+                stype = 'web' if src.startswith('http') else ('pdf' if src.endswith('.pdf') else 'file')
+                inserted = sum(1 for cid in cids if cid not in existing)
+                skipped = len(cids) - inserted
+                print(f"[ingest] source_type={stype} url={src} inserted={inserted} skipped_duplicates={skipped}")
+
+        except NotImplementedError:
+            # BigQuery doesn't support real-time upserts
+            print(f"[ingest] Warning: Real-time insertion not supported for this vector backend.")
+            print(f"[ingest] Please use batch ingestion scripts for BigQuery.")
+            print(f"[ingest] Total chunks prepared: {len(documents)}")
+            # Log the would-be insertions
+            for src, cids in per_source_ids.items():
+                stype = 'web' if src.startswith('http') else ('pdf' if src.endswith('.pdf') else 'file')
+                print(f"[ingest] source_type={stype} url={src} chunks={len(cids)}")
     
     def _chunk_text_simple(self, text: str, max_len: int = 1000, overlap_chars: int = 150) -> List[str]:
         """Simple text chunking for non-markdown content."""
@@ -532,13 +552,13 @@ async def retrieve(
     header_contains: Optional[str] = None,
     source_contains: Optional[str] = None,
 ) -> str:
-    """Retrieve relevant documents from ChromaDB based on a search query.
-    
+    """Retrieve relevant documents from vector store based on a search query.
+
     Args:
         context: The run context containing dependencies.
         search_query: The search query to find relevant documents.
         n_results: Number of results to return (default: 5).
-        
+
     Returns:
         Formatted context information from the retrieved documents.
     """
@@ -561,12 +581,8 @@ async def retrieve(
     breaker_triggered = False
     request_id = str(_uuid.uuid4())
 
-    # Get ChromaDB client and collection (reused via utils caches)
-    collection = get_or_create_collection(
-        context.deps.chroma_client,
-        context.deps.collection_name,
-        embedding_model_name=context.deps.embedding_model
-    )
+    # Get vector store from dependencies
+    vector_store = context.deps.vector_store
     # Ensure rules are loaded (no-op if already)
     try:
         load_all_rules("rules")
@@ -596,7 +612,7 @@ async def retrieve(
         if material_hit and wind_mph_val is not None:
             # Scan candidate chunks by keyword for tables
             substrings = [material_hit, "table", "underlayment", "1507"]
-            scan = keyword_search_collection(collection, substrings, max_results=max(15, n_results))
+            scan = vector_store.keyword_search(substrings, max_results=max(15, n_results))
             docs = scan.get("documents", [[]])[0]
             metas = scan.get("metadatas", [[]])[0]
 
@@ -686,13 +702,18 @@ async def retrieve(
                     tiers_flat.append(t)
 
         # Initial candidate pool: vector + keyword merge similar to below but larger for filtering
-        base_results = query_collection(collection, search_query, n_results=max(n_results, 25))
+        # For vector search, we need embeddings
+        from utils import create_embedding_function
+        embed_fn = create_embedding_function()
+        query_embedding = embed_fn([search_query])[0]
+
+        base_results = vector_store.vector_search(query_embedding, n_results=max(n_results, 25))
         base_ids = [*base_results.get("ids", [[]])[0]]
         base_docs = [*base_results.get("documents", [[]])[0]]
         base_metas = [*base_results.get("metadatas", [[]])[0]]
 
         # Add keyword scan candidates to broaden the pool
-        kw_scan = keyword_search_collection(collection, [search_query], max_results=100)
+        kw_scan = vector_store.keyword_search([search_query], max_results=100)
         for i, id_ in enumerate(kw_scan.get("ids", [[]])[0]):
             if id_ not in base_ids:
                 base_ids.append(id_)
@@ -792,11 +813,17 @@ async def retrieve(
 
     # Vector query first (bounded)
     n_results = min(n_results, max_n_results)
-    query_results = query_collection(collection, search_query, n_results=n_results)
+
+    # Create embeddings for vector search
+    from utils import create_embedding_function
+    embed_fn = create_embedding_function()
+    query_embedding = embed_fn([search_query])[0]
+
+    query_results = vector_store.vector_search(query_embedding, n_results=n_results)
 
     # Hybrid fallback for numeric/table/section queries
     section_terms = build_section_search_terms(search_query)
-    kw_results = keyword_search_collection(collection, section_terms, max_results=max(3, n_results))
+    kw_results = vector_store.keyword_search(section_terms, max_results=max(3, n_results))
 
     # Merge vector and keyword hits (dedupe by id, prefer vector order)
     # Apply candidate discipline: cap candidates before rerank/format
@@ -1085,25 +1112,36 @@ async def run_rag_agent(
     embedding_model: str = "all-MiniLM-L6-v2",
     n_results: int = 5
 ) -> str:
-    """Run the RAG agent to answer a question about Pydantic AI.
-    
+    """Run the RAG agent to answer a question.
+
     Args:
         question: The question to answer.
-        collection_name: Name of the ChromaDB collection to use.
-        db_directory: Directory where ChromaDB data is stored.
+        collection_name: Name of the collection to use (for Chroma backend).
+        db_directory: Directory where vector store data is stored (for Chroma backend).
         embedding_model: Name of the embedding model to use.
         n_results: Number of results to return from the retrieval.
-        
+
     Returns:
         The agent's response.
     """
     # Resolve collection once for this run
     resolved_collection = resolve_collection_name(collection_name)
 
+    # Resolve vector backend and create appropriate store
+    backend_name, backend_config = resolve_vector_backend()
+
+    if backend_name == "bigquery":
+        vector_store = get_vector_store(backend="bigquery")
+    else:
+        vector_store = get_vector_store(
+            backend="chroma",
+            persist_directory=db_directory or get_default_chroma_dir(),
+            collection_name=resolved_collection,
+        )
+
     # Create dependencies
     deps = RAGDeps(
-        chroma_client=get_chroma_client(db_directory or get_default_chroma_dir()),
-        collection_name=resolved_collection,
+        vector_store=vector_store,
         embedding_model=embedding_model
     )
     
@@ -1142,8 +1180,7 @@ async def run_rag_agent(
 
         # Light keyword search to broaden candidates (non-blocking)
         try:
-            coll = get_or_create_collection(get_chroma_client(db_directory), resolved_collection, embedding_model_name=embedding_model)
-            _ = keyword_search_collection(coll, retry_tokens, max_results=5)
+            _ = vector_store.keyword_search(retry_tokens, max_results=5)
         except Exception:
             pass
 
