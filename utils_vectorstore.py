@@ -353,15 +353,17 @@ class BigQueryVectorStore(VectorStore):
             table=self.table,
         )
 
-        # Convert to Chroma-like format
+        # Convert to Chroma-like format (with distances for consistency)
         ids = [r["chunk_id"] for r in results]
         documents = [r["content"] for r in results]
         metadatas = [r["metadata"] for r in results]
+        distances = [r.get("distance", 0.0) for r in results]
 
         return {
             "ids": [ids],
             "documents": [documents],
             "metadatas": [metadatas],
+            "distances": [distances],
         }
 
     def get_by_ids(self, ids: List[str]) -> Dict[str, Any]:

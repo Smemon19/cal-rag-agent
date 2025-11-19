@@ -16,7 +16,7 @@ except Exception:  # pragma: no cover - fallback for older/newer versions
 from utils import resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, get_default_chroma_dir, resolve_collection_name
 from utils import get_process_uptime_seconds, get_memory_usage_mb, get_query_count, get_embedding_cache_stats
 from utils import sanitize_and_validate_openai_key, get_key_diagnostics, compute_embedding_fingerprint
-from utils import increment_query_count
+from utils import increment_query_count, _LAST_VECTOR_STORE_STATUS
 from utils_vectorstore import get_vector_store, resolve_vector_backend
 
 # Force sane defaults: prefer writable /tmp target unless explicitly overridden
@@ -218,6 +218,13 @@ def _vector_store_diag() -> dict:
 
         if backend_name == "bigquery":
             # BigQuery-specific diagnostics
+            from pathlib import Path
+            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            creds_status = "not_set"
+            if creds_path:
+                creds_file = Path(creds_path)
+                creds_status = "exists" if creds_file.exists() else "missing_file"
+
             result.update({
                 "project": info.get("project", "N/A"),
                 "dataset": info.get("dataset", "N/A"),
@@ -226,6 +233,8 @@ def _vector_store_diag() -> dict:
                 "indexes": info.get("indexes", []),
                 "created": info.get("created", "N/A"),
                 "modified": info.get("modified", "N/A"),
+                "credentials_status": creds_status,
+                "credentials_path": creds_path or "using_default_ADC",
             })
         else:
             # Chroma-specific diagnostics
@@ -444,18 +453,21 @@ async def main():
             fp = compute_embedding_fingerprint()
         except Exception:
             fp = _fingerprint or {}
+        # Get vector store diagnostics (backend-aware)
+        vs_diag = _vector_store_diag()
+
         st.code(str({
             "uptime_sec": get_process_uptime_seconds(),
             "memory_mb": get_memory_usage_mb(),
             "queries_served": get_query_count(),
-            "vector_store": {
+            "vector_store_init": {
                 "reused": vs_status.get("reused"),
                 "ts": vs_status.get("ts"),
                 "target": vs_status.get("target"),
                 "collection": vs_status.get("collection_name"),
             },
+            "vector_store_backend": vs_diag,
             "embedding_cache": emb_stats,
-            "chroma_mirror": _chroma_diag(),
             "api_key": _api_key_diag(),
             "model_choice": os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
             "embedding_backend": backend,
