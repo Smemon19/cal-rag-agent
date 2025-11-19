@@ -121,7 +121,7 @@ def ensure_appdata_scaffold() -> None:
         template = (
             "# Cal RAG Agent configuration\n"
             "# Fill in your API key if using OpenAI models.\n"
-            "MODEL_CHOICE=gpt-4.1-mini\n"
+            "MODEL_CHOICE=gpt-4o-mini\n"
             "OPENAI_API_KEY=\n"
             "# Embeddings backend: sentence (default) or openai\n"
             "EMBEDDING_BACKEND=sentence\n"
@@ -191,7 +191,7 @@ def sanitize_and_validate_openai_key() -> None:
 
     - Do not read from repo .env; only environment or OPENAI_API_KEY_FILE if provided by platform.
     - Trim whitespace and quotes; persist sanitized value to os.environ.
-    - Validate prefix: sk-live- or sk-proj-; on invalid, record error for readiness gate.
+    - Validate prefix: accepts sk-, sk-live-, or sk-proj-; on invalid, record error for readiness gate.
     - Record masked prefix (first 5 chars + '…') for diagnostics only; never log full key.
     """
     global _KEY_SANITIZED_PREFIX, _KEY_VALIDATED, _KEY_VALIDATION_ERROR
@@ -214,10 +214,10 @@ def sanitize_and_validate_openai_key() -> None:
             _KEY_VALIDATION_ERROR = "OPENAI_API_KEY missing"
             _KEY_SANITIZED_PREFIX = ""
             return
-        # Prefix validation
-        if not (key.startswith("sk-live-") or key.startswith("sk-proj-")):
+        # Prefix validation - accept standard sk- as well as sk-live- and sk-proj-
+        if not key.startswith("sk-"):
             _KEY_VALIDATED = False
-            _KEY_VALIDATION_ERROR = "OPENAI_API_KEY has unexpected prefix"
+            _KEY_VALIDATION_ERROR = "OPENAI_API_KEY has unexpected prefix (should start with sk-)"
         else:
             _KEY_VALIDATED = True
             _KEY_VALIDATION_ERROR = ""

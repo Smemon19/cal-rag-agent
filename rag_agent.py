@@ -68,7 +68,12 @@ os.environ.setdefault("RAG_COLLECTION_NAME", "docs_ibc_v2")
 ensure_appdata_scaffold()
 if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
     try:
-        dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=False)
+        # Try repo .env first, then fall back to appdata .env
+        repo_env = Path(__file__).resolve().parent / ".env"
+        if repo_env.exists():
+            dotenv.load_dotenv(dotenv_path=repo_env, override=False)
+        else:
+            dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=False)
     except Exception:
         pass
 
@@ -84,6 +89,8 @@ class RAGDeps:
     """Dependencies for the RAG agent."""
     vector_store: VectorStore
     embedding_model: str
+    collection_name: str = "docs_ibc_v2"
+    vector_backend: str = "chroma"
     header_contains: Optional[str] = None
     source_contains: Optional[str] = None
 
@@ -509,7 +516,7 @@ def create_agent():
             "pydantic_ai is required to create the agent. Install it or avoid calling create_agent() at import time."
         )
     return Agent(
-        os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
+        os.getenv("MODEL_CHOICE", "gpt-4o-mini"),
         deps_type=RAGDeps,
         system_prompt="""You are the CAL Engineering Assistant, an expert system for analyzing building codes, structural engineering standards, and construction specifications.
 
@@ -564,7 +571,7 @@ def get_agent():
     global agent, _last_openai_key, _last_model_choice
 
     current_key = os.getenv("OPENAI_API_KEY")
-    current_model = os.getenv("MODEL_CHOICE", "gpt-4.1-mini")
+    current_model = os.getenv("MODEL_CHOICE", "gpt-4o-mini")
 
     # Recreate the agent if not present or if the API key/model changed
     if agent is None or _last_openai_key != current_key or _last_model_choice != current_model:
@@ -1175,7 +1182,9 @@ async def run_rag_agent(
     # Create dependencies
     deps = RAGDeps(
         vector_store=vector_store,
-        embedding_model=embedding_model
+        embedding_model=embedding_model,
+        collection_name=resolved_collection if backend_name == "chroma" else "docs_ibc_v2",
+        vector_backend=backend_name
     )
     
     # First draft
