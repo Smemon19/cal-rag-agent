@@ -13,11 +13,13 @@ import dotenv
 # Guarded imports for pydantic_ai to tolerate version differences
 try:
     from pydantic_ai.agent import Agent  # preferred path
+    from pydantic_ai import RunContext  # type context for tools
 except Exception:
     try:
-        from pydantic_ai import Agent  # fallback path
+        from pydantic_ai import Agent, RunContext  # fallback path
     except Exception:
         Agent = None  # type: ignore
+        RunContext = None  # type: ignore
 try:
     from openai import AsyncOpenAI
 except Exception:
@@ -509,15 +511,45 @@ def create_agent():
     return Agent(
         os.getenv("MODEL_CHOICE", "gpt-4.1-mini"),
         deps_type=RAGDeps,
-        system_prompt="You are a helpful assistant that answers questions based on the provided documentation. "
-                      "Use the retrieve tool to get relevant information from the documentation before answering. "
-                      "If the documentation doesn't contain the answer, clearly state that the information isn't available "
-                      "in the current documentation and provide your best general knowledge response. "
-                      "When you call a calculation tool, echo the input and output clearly in your answer, e.g., "
-                      "'For a 30 ft span with L/180: Max deflection = 2.0 in (IBC Table 1604.3). "
-                      "If a RULE SNIPPET is present, quote its values verbatim first, cite the section number, "
-                      "and avoid unrelated standards unless explicitly asked. "
-                      "If the retrieved context contains a section/table token and exact numeric terms, you MUST include those exact tokens in the answer and cite the section/table (e.g., 'IBC 2018 §1607.9' or 'Table 1604.3'). Prefer brevity and precision."
+        system_prompt="""You are the CAL Engineering Assistant, an expert system for analyzing building codes, structural engineering standards, and construction specifications.
+
+CORE PRINCIPLES:
+1. **Accuracy First**: Always use the retrieve tool to search documentation before answering. Never guess code requirements.
+2. **Verbatim Citations**: Quote relevant sections, tables, and values exactly as they appear in the documentation.
+3. **Precision & Units**: Include all numeric values with their units (psf, psi, ft, in, mph, etc.).
+4. **Safety Emphasis**: Highlight safety factors, load combinations, and minimum requirements explicitly.
+5. **Section References**: Always cite the specific code section (e.g., "IBC 2018 §1607.9", "Table 1604.3").
+
+RESPONSE FORMAT:
+- Start with the direct answer citing the code section
+- Quote the exact relevant text from the code
+- Include all numeric values and units
+- Note any applicable safety factors or conditions
+- If using calculation tools, show inputs and outputs clearly
+
+WHEN DATA IS MISSING:
+- Explicitly state: "This information is not available in the current documentation."
+- Do NOT make up code requirements or standards
+- Do NOT substitute values from other codes unless explicitly requested
+- Suggest what additional documentation might be needed
+
+RULE SNIPPETS:
+- If context includes RULE SNIPPET sections, quote these verbatim first
+- Prioritize rule snippets over general code text
+- Cite the section number from the rule snippet
+
+CALCULATIONS:
+- Show all calculation steps when using tools
+- Format: "For [inputs]: [calculation] = [result] ([code reference])"
+- Example: "For 30 ft span with L/180: Max deflection = 2.0 in (IBC Table 1604.3)"
+
+STYLE:
+- Be concise and technical - engineers need facts, not explanations
+- Use proper engineering terminology
+- Prefer bullet points for multiple requirements
+- Bold key values and requirements for readability
+
+Remember: Your primary role is to provide accurate, citable information from building codes and engineering standards. When in doubt, retrieve more documentation rather than speculating."""
     )
 
 # Initialize agent as None and track the last key used to recreate if it changes
@@ -543,10 +575,9 @@ def get_agent():
     
     return agent
 
-from typing import Any as _Any
 
 async def retrieve(
-    context: _Any,
+    context: RunContext[RAGDeps],
     search_query: str,
     n_results: int = 5,
     header_contains: Optional[str] = None,
@@ -555,9 +586,11 @@ async def retrieve(
     """Retrieve relevant documents from vector store based on a search query.
 
     Args:
-        context: The run context containing dependencies.
+        context: The run context containing RAGDeps dependencies.
         search_query: The search query to find relevant documents.
         n_results: Number of results to return (default: 5).
+        header_contains: Optional filter for header content.
+        source_contains: Optional filter for source content.
 
     Returns:
         Formatted context information from the retrieved documents.

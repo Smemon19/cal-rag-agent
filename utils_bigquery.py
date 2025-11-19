@@ -45,10 +45,33 @@ def get_bq_client(project: Optional[str] = None) -> Client:
 
     Returns:
         BigQuery Client instance
+
+    Raises:
+        ValueError: If GOOGLE_APPLICATION_CREDENTIALS is set but file doesn't exist
+        Exception: If BigQuery client initialization fails
     """
     global _BQ_CLIENT_CACHE, _BQ_LAST_STATUS
 
     project_id = project or get_bq_project()
+
+    # Validate GOOGLE_APPLICATION_CREDENTIALS if set
+    creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if creds_path:
+        from pathlib import Path
+        creds_file = Path(creds_path)
+        if not creds_file.exists():
+            error_msg = f"GOOGLE_APPLICATION_CREDENTIALS points to non-existent file: {creds_path}"
+            error_status = {
+                "where": "bigquery",
+                "action": "init_error",
+                "error": error_msg,
+                "project": project_id,
+                "creds_path": creds_path,
+                "ts": datetime.now(timezone.utc).isoformat(),
+            }
+            _BQ_LAST_STATUS = error_status
+            print(json.dumps(error_status))
+            raise ValueError(error_msg)
 
     # Return cached client if available and project matches
     if _BQ_CLIENT_CACHE is not None:
@@ -59,6 +82,7 @@ def get_bq_client(project: Optional[str] = None) -> Client:
                 "target": "client",
                 "project": project_id,
                 "reused": True,
+                "creds_configured": bool(creds_path),
                 "ts": datetime.now(timezone.utc).isoformat(),
             }
             _BQ_LAST_STATUS = status
@@ -75,17 +99,26 @@ def get_bq_client(project: Optional[str] = None) -> Client:
             "target": "client",
             "project": project_id,
             "reused": False,
+            "creds_configured": bool(creds_path),
             "ts": datetime.now(timezone.utc).isoformat(),
         }
         _BQ_LAST_STATUS = status
         print(json.dumps(status))
         return client
     except Exception as e:
+        error_msg = str(e)
+        # Provide helpful error messages for common authentication issues
+        if "could not automatically determine credentials" in error_msg.lower():
+            error_msg += " | Hint: Set GOOGLE_APPLICATION_CREDENTIALS to your service account key path"
+        elif "permission" in error_msg.lower() or "forbidden" in error_msg.lower():
+            error_msg += " | Hint: Check service account has BigQuery permissions"
+
         error_status = {
             "where": "bigquery",
             "action": "init_error",
-            "error": str(e),
+            "error": error_msg,
             "project": project_id,
+            "creds_configured": bool(creds_path),
             "ts": datetime.now(timezone.utc).isoformat(),
         }
         _BQ_LAST_STATUS = error_status
@@ -349,6 +382,7 @@ def keyword_search(
                 "content": row["content"],
                 "source_url": row.get("source_url", ""),
                 "metadata": metadata or {},
+                "distance": 0.0,  # Keyword matches have no meaningful distance; set to 0 for consistency
             })
 
         return output
