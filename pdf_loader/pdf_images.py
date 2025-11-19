@@ -32,8 +32,13 @@ def extract_images(
             pages = list(range(1, total_pages + 1))
 
         page_images: Dict[int, List[Path]] = {}
+        total = len(pages)
 
-        for pnum in pages:
+        for idx, pnum in enumerate(pages, start=1):
+            try:
+                print(f"[pdf-images] {idx}/{total} (p={pnum})", flush=True)
+            except Exception:
+                pass
             page = doc[pnum - 1]
             page_image_paths: List[Path] = []
 

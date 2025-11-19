@@ -1,31 +1,53 @@
-# Python
-__pycache__/
+.git
+.venv
+.venv_local
+__pycache__
+node_modules
+*.log
+*.md
+tests
+.DS_Store
+
+# VCS & caches
+.git
+.git-lfs
+*.log
+__pycache__
 *.pyc
 *.pyo
 *.pyd
-.Python
-env/
-venv/
-.venv/
-pip-wheel-metadata/
-
-# Node
-node_modules/
-
-# Build/artefacts
-dist/
-build/
-.next/
-
-# VCS
-.git
-.gitignore
-
-# OS
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.ipynb_checkpoints
 .DS_Store
 
-# Local databases or large assets not needed in image
-*.sqlite3
-*.db
+# Python envs
+.venv
+.venv_local
+env
+venv
 
+# Node stuff (if present)
+node_modules
+*.tsbuildinfo
 
+# Large artifacts
+data
+datasets
+models
+checkpoints
+artifacts
+outputs
+tmp
+temp
+.cache
+.wheels
+dist
+build
+
+# Docs & big assets (if not needed at runtime)
+docs
+examples
+assets
+media

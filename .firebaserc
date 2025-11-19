@@ -1,5 +1,31 @@
 {
   "projects": {
-    "default": "m-cloud-7a09b"
-  }
+    "default": "m-cloud-7a09b",
+    "cal": "m-cloud-7a09b",
+    "prod": "cal-rag-agent"
+  },
+  "targets": {
+    "m-cloud-7a09b": {
+      "hosting": {
+        "cal-rag-agent": [
+          "cal-rag-agent"
+        ]
+      }
+    },
+    "cal-rag-agent": {
+      "hosting": {
+        "cal-rag-agent": [
+          "cal-rag-agent"
+        ]
+      }
+    },
+    "cal-rag-agent-app": {
+      "hosting": {
+        "cal-rag-agent": [
+          "cal-rag-agent"
+        ]
+      }
+    }
+  },
+  "etags": {}
 }

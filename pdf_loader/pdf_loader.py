@@ -86,12 +86,14 @@ def process_pdf(
     if diagnostic_dir is not None:
         diagnostic_dir.mkdir(parents=True, exist_ok=True)
 
+    print(f"[pdf-loader] Extracting text from {len(pages) if pages else 'all'} pages...", flush=True)
     page_texts = extract_text(
         pdf_path,
         page_numbers=pages,
         include_tables=True,
         diagnostic_dir=(diagnostic_dir / "text") if diagnostic_dir else None,
     )
+    print(f"[pdf-loader] Text extraction complete. Extracting images...", flush=True)
     page_images = extract_images(
         pdf_path,
         image_dir,
@@ -99,6 +101,7 @@ def process_pdf(
         render_pages_dpi=render_pages_dpi,
         diagnostic_dir=(diagnostic_dir / "renders") if diagnostic_dir else None,
     )
+    print(f"[pdf-loader] Image extraction complete. Processing pages...", flush=True)
 
     chunks: List[Dict[str, Any]] = []
     chunk_id = 0
