@@ -1,6 +1,7 @@
 import streamlit as st
 import asyncio
 import os
+import re
 from pathlib import Path
 import shutil
 import time
@@ -13,7 +14,7 @@ except Exception:  # pragma: no cover - fallback for older/newer versions
         pass
 
 # Resolve and load .env from writable AppData directory; create scaffold on first run
-from utils import resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, get_default_chroma_dir, resolve_collection_name
+from utils import resolve_embedding_backend_and_model, get_env_file_path, ensure_appdata_scaffold, resolve_collection_name
 from utils import get_process_uptime_seconds, get_memory_usage_mb, get_query_count, get_embedding_cache_stats
 from utils import sanitize_and_validate_openai_key, get_key_diagnostics, compute_embedding_fingerprint
 from utils import increment_query_count, _LAST_VECTOR_STORE_STATUS
@@ -21,90 +22,13 @@ from utils_vectorstore import get_vector_store, resolve_vector_backend
 
 # Force sane defaults: prefer writable /tmp target unless explicitly overridden
 try:
-    default_tmp_chroma = str(Path("/tmp") / ".calrag" / "chroma")
-    if not os.getenv("CHROMA_DIR"):
-        os.environ.setdefault("CHROMA_DIR", default_tmp_chroma)
+    pass
 except Exception:
     pass
 os.environ.setdefault("RAG_COLLECTION_NAME", "docs_ibc_v2")
 
 ensure_appdata_scaffold()
 
-# Mirror baked repo chroma_db to writable target on cold start with lock + sentinel
-def _mirror_repo_chroma_to_writable_target() -> None:
-    try:
-        repo_dir = Path(__file__).resolve().parent / "chroma_db"
-        target_dir = Path(os.getenv("CHROMA_DIR", str(Path("/tmp") / ".calrag" / "chroma")))
-        target_dir.mkdir(parents=True, exist_ok=True)
-
-        sentinel = target_dir / ".ready"
-        if sentinel.exists():
-            return
-
-        lock_file = target_dir / ".init.lock"
-        have_lock = False
-        t0 = time.time()
-        # Count source files best-effort
-        try:
-            src_files = sum(1 for p in repo_dir.rglob("*") if p.is_file()) if repo_dir.exists() else 0
-        except Exception:
-            src_files = -1
-        try:
-            # Attempt exclusive lock file creation
-            with open(lock_file, "x") as f:
-                f.write(str(os.getpid()))
-            have_lock = True
-        except FileExistsError:
-            # Another process may be initializing; wait briefly for readiness
-            for _ in range(50):  # ~5s max
-                if sentinel.exists():
-                    return
-                time.sleep(0.1)
-            # Timed out waiting; do a last-chance check and return regardless to avoid duplicate heavy copy
-            if sentinel.exists():
-                return
-            return
-
-        # Determine if destination is effectively empty (ignoring lock/sentinel)
-        is_empty = True
-        try:
-            for entry in target_dir.iterdir():
-                if entry.name not in {".init.lock", ".ready"}:
-                    is_empty = False
-                    break
-        except Exception:
-            is_empty = True
-
-        # Copy only if we have a source and destination is empty
-        if is_empty and repo_dir.exists() and repo_dir.is_dir():
-            shutil.copytree(repo_dir, target_dir, dirs_exist_ok=True)
-
-        # Drop sentinel to indicate readiness
-        try:
-            sentinel.write_text("ok", encoding="utf-8")
-        except Exception:
-            # Do not fail startup if sentinel cannot be written
-            pass
-        # Log a concise mirror summary once
-        try:
-            dest_files = sum(1 for p in target_dir.rglob("*") if p.is_file())
-        except Exception:
-            dest_files = -1
-        elapsed_ms = int((time.time() - t0) * 1000)
-        print(f"[chroma-mirror] src_files={src_files} dest_files={dest_files} elapsed_ms={elapsed_ms}")
-    except Exception:
-        # Best-effort; avoid blocking startup
-        pass
-    finally:
-        try:
-            if (target_dir := Path(os.getenv("CHROMA_DIR", str(Path("/tmp") / ".calrag" / "chroma")))).exists():
-                lock_path = target_dir / ".init.lock"
-                if lock_path.exists():
-                    lock_path.unlink(missing_ok=True)  # type: ignore[arg-type]
-        except Exception:
-            pass
-
-_mirror_repo_chroma_to_writable_target()
 # Do not load .env in container runtime; rely on App Hosting/Cloud env
 if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
     try:
@@ -112,31 +36,21 @@ if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FI
         # Try repo .env first, then fall back to appdata .env
         repo_env = Path(__file__).resolve().parent / ".env"
         if repo_env.exists():
-            load_dotenv(dotenv_path=repo_env, override=False)
+            load_dotenv(dotenv_path=repo_env, override=True)
         else:
-            load_dotenv(dotenv_path=get_env_file_path(), override=False)
+            load_dotenv(dotenv_path=get_env_file_path(), override=True)
     except Exception:
         pass
 
-from rag_agent import get_agent, RAGDeps
+from rag_agent import get_agent, RAGDeps, build_retrieval_context
 
 
 # Cache a single vector store instance per process to avoid heavy reinitialization on rerenders
 @st.cache_resource(show_spinner=False)
 def _get_cached_vector_store():
     """Get or create cached vector store instance."""
-    backend_name, backend_config = resolve_vector_backend()
-
-    if backend_name == "bigquery":
-        return get_vector_store(backend="bigquery")
-    else:
-        # Default to Chroma
-        resolved_collection = resolve_collection_name(None)
-        return get_vector_store(
-            backend="chroma",
-            persist_directory=get_default_chroma_dir(),
-            collection_name=resolved_collection,
-        )
+    # Always force BigQuery backend
+    return get_vector_store(backend="bigquery")
 
 # Sanitize and validate key once at startup (lightweight)
 sanitize_and_validate_openai_key()
@@ -164,10 +78,7 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
     print(f"[ui] Using vector backend: '{backend_name}'")
     st.sidebar.caption(f"Vector backend: {backend_name}")
 
-    if backend_name == "chroma":
-        resolved_collection = resolve_collection_name(None)
-        st.sidebar.caption(f"Collection: {resolved_collection}")
-    elif backend_name == "bigquery":
+    if backend_name == "bigquery":
         st.sidebar.caption(f"Project: {backend_config.get('project', 'N/A')}")
         st.sidebar.caption(f"Dataset: {backend_config.get('dataset', 'N/A')}")
 
@@ -175,16 +86,11 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
     emb_backend, emb_model = resolve_embedding_backend_and_model()
     st.sidebar.caption(f"Embeddings: {emb_backend} / {emb_model}")
 
-    # Get collection name based on backend
-    if backend_name == "chroma":
-        resolved_collection = resolve_collection_name(None)
-        collection_name = resolved_collection
-    else:
-        collection_name = "docs_ibc_v2"  # BigQuery uses table name instead
+    collection_name = "docs_ibc_v2"  # BigQuery uses table name instead
 
     return RAGDeps(
         vector_store=_get_cached_vector_store(),
-        embedding_model="all-MiniLM-L6-v2",
+        embedding_model=emb_model,
         collection_name=collection_name,
         vector_backend=backend_name,
         header_contains=(header_contains or None),
@@ -192,75 +98,39 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
     )
 
 
-def _chroma_diag() -> dict:
-    """Return diagnostics for writable Chroma mirror."""
-    try:
-        target_dir = Path(os.getenv("CHROMA_DIR", str(Path("/tmp") / ".calrag" / "chroma")))
-        sentinel = target_dir / ".ready"
-        try:
-            file_count = sum(1 for p in target_dir.rglob("*") if p.is_file())
-        except Exception:
-            file_count = -1
-        try:
-            total_bytes = sum(p.stat().st_size for p in target_dir.rglob("*") if p.is_file())
-        except Exception:
-            total_bytes = -1
-        return {
-            "CHROMA_DIR": str(target_dir),
-            "ready": sentinel.exists(),
-            "file_count": file_count,
-            "total_bytes": total_bytes,
-        }
-    except Exception:
-        return {"CHROMA_DIR": os.getenv("CHROMA_DIR", ""), "ready": False, "file_count": -1, "total_bytes": -1}
-
-
 def _vector_store_diag() -> dict:
-    """Return diagnostics for the active vector store (Chroma or BigQuery)."""
+    """Return diagnostics for the active vector store (BigQuery)."""
     try:
         vector_store = _get_cached_vector_store()
-        backend_name, backend_config = resolve_vector_backend()
-
+        
         # Get common info from vector store
         info = vector_store.get_info()
         doc_count = vector_store.count_documents()
 
         result = {
-            "backend": backend_name,
+            "backend": "bigquery",
             "document_count": doc_count,
         }
 
-        if backend_name == "bigquery":
-            # BigQuery-specific diagnostics
-            from pathlib import Path
-            creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-            creds_status = "not_set"
-            if creds_path:
-                creds_file = Path(creds_path)
-                creds_status = "exists" if creds_file.exists() else "missing_file"
+        # BigQuery-specific diagnostics
+        from pathlib import Path
+        creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        creds_status = "not_set"
+        if creds_path:
+            creds_file = Path(creds_path)
+            creds_status = "exists" if creds_file.exists() else "missing_file"
 
-            result.update({
-                "project": info.get("project", "N/A"),
-                "dataset": info.get("dataset", "N/A"),
-                "table": info.get("table", "N/A"),
-                "table_size_bytes": info.get("table_size_bytes", 0),
-                "indexes": info.get("indexes", []),
-                "created": info.get("created", "N/A"),
-                "modified": info.get("modified", "N/A"),
-                "credentials_status": creds_status,
-                "credentials_path": creds_path or "using_default_ADC",
-            })
-        else:
-            # Chroma-specific diagnostics
-            chroma_diag = _chroma_diag()
-            result.update({
-                "collection_name": info.get("collection_name", "N/A"),
-                "persist_directory": info.get("persist_directory", "N/A"),
-                "distance_function": info.get("distance_function", "cosine"),
-                "chroma_dir_ready": chroma_diag.get("ready", False),
-                "chroma_file_count": chroma_diag.get("file_count", -1),
-                "chroma_total_bytes": chroma_diag.get("total_bytes", -1),
-            })
+        result.update({
+            "project": info.get("project", "N/A"),
+            "dataset": info.get("dataset", "N/A"),
+            "table": info.get("table", "N/A"),
+            "table_size_bytes": info.get("table_size_bytes", 0),
+            "indexes": info.get("indexes", []),
+            "created": info.get("created", "N/A"),
+            "modified": info.get("modified", "N/A"),
+            "credentials_status": creds_status,
+            "credentials_path": creds_path or "using_default_ADC",
+        })
 
         return result
 
@@ -295,8 +165,11 @@ def display_message_part(part):
     """
     # user-prompt
     if part.part_kind == 'user-prompt':
+        content = part.content
+        if "User question:" in content:
+            content = content.split("User question:", 1)[1].strip()
         with st.chat_message("user"):
-            st.markdown(part.content)
+            st.markdown(content)
     # text
     elif part.part_kind == 'text':
         with st.chat_message("assistant"):
@@ -322,13 +195,48 @@ def display_message_part(part):
 
 async def run_agent_with_streaming(user_input):
     try:
+        deps: RAGDeps = st.session_state.agent_deps
+        context_text, structured_entries = build_retrieval_context(
+            user_input,
+            deps,
+            n_results=5,
+            header_contains=getattr(deps, "header_contains", None),
+            source_contains=getattr(deps, "source_contains", None),
+        )
+
+        if not context_text.strip():
+            fallback_prompt = (
+                "You do not have any retrieved reference material to cite. Respond to the user's question "
+                "using your general building-code expertise. If the question requires specific code references "
+                "that you cannot confirm, acknowledge that while still providing helpful guidance.\n\n"
+                f"User question: {user_input}"
+            )
+            async with get_agent().run_stream(
+                fallback_prompt,
+                deps=deps,
+                message_history=st.session_state.agent_messages,
+                model_settings={"temperature": 0.4},
+            ) as result:
+                async for message in result.stream_text(delta=True):
+                    yield message
+            st.session_state.last_agent_new_messages = result.new_messages()
+            return
+
+        augmented_question = (
+            "Answer the user using ONLY the context provided. Cite sections in plain text "
+            "(e.g., \"IBC 2018 §1507.2\") when possible. If the context does not contain the answer, "
+            "reply with \"I don't have that information in the current documentation.\" Use a natural tone.\n\n"
+            f"Context:\n{context_text}\n\nUser question: {user_input}"
+        )
         async with get_agent().run_stream(
-            user_input, deps=st.session_state.agent_deps, message_history=st.session_state.messages
+            augmented_question,
+            deps=deps,
+            message_history=st.session_state.agent_messages,
+            model_settings={"temperature": 0.2},
         ) as result:
             async for message in result.stream_text(delta=True):
                 yield message
-        # Add the new messages to the chat history (including tool calls and responses)
-        st.session_state.messages.extend(result.new_messages())
+        st.session_state.last_agent_new_messages = result.new_messages()
     except ModelHTTPError as e:
         # Re-raise with a sentinel attribute so UI can display a friendly message
         setattr(e, "_is_auth_error", getattr(e, "status_code", None) == 401 or "status_code: 401" in str(e))
@@ -346,8 +254,9 @@ async def main():
 
     # Lightweight health probe: return quickly when ?healthz=1
     try:
-        params = st.experimental_get_query_params()
-        if params.get("healthz") == ["1"]:
+        params = st.query_params
+        healthz = params.get("healthz") if params else None
+        if healthz == "1" or (isinstance(healthz, list) and "1" in healthz):
             st.write("ok")
             return
     except Exception:
@@ -360,6 +269,19 @@ async def main():
         with st.sidebar.expander("Diagnostics", expanded=True):
             st.code(str({"api_key": _api_key_diag()}))
         st.stop()
+
+    # Dependency check: Tesseract
+    import shutil
+    if not shutil.which("tesseract"):
+        st.sidebar.error("⚠️ 'tesseract' dependency is missing! PDF OCR features will fail.")
+        with st.sidebar.expander("Installation Help", expanded=True):
+            st.markdown("""
+            **Tesseract OCR is required.**
+            - **Mac:** `brew install tesseract`
+            - **Windows:** [Install Tesseract-OCR](https://github.com/UB-Mannheim/tesseract/wiki)
+            - **Linux:** `sudo apt install tesseract-ocr`
+            """)
+
     # Prewarm embeddings on first render (graceful failure - app can continue)
     try:
         # Touch embedding function to ensure model is loaded
@@ -372,8 +294,10 @@ async def main():
         print(f"[embeddings] Warmup failed (non-fatal): {e}")
 
     # Initialize chat history in session state if not present
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "agent_messages" not in st.session_state:
+        st.session_state.agent_messages = []
     # Sidebar controls: collection display + optional filters
     # Preserve last values via session_state keys
     if "header_contains" not in st.session_state:
@@ -399,12 +323,12 @@ async def main():
             f"Filters: header='{st.session_state.header_contains or ''}', source='{st.session_state.source_contains or ''}'"
         )
 
-    # Display all messages from the conversation so far by duck-typing message objects
-    for msg in st.session_state.messages:
-        parts = getattr(msg, "parts", None)
-        if parts:
-            for part in parts:
-                display_message_part(part)
+    # Display all messages from the conversation so far
+    for item in st.session_state.chat_history:
+        role = item.get("role", "assistant")
+        content = item.get("content", "")
+        with st.chat_message(role):
+            st.markdown(content)
 
     # Chat input for the user
     user_input = st.chat_input("What do you want to know?")
@@ -413,6 +337,7 @@ async def main():
         # Display user prompt in the UI
         with st.chat_message("user"):
             st.markdown(user_input)
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
 
         # Display the assistant's partial response while streaming
         with st.chat_message("assistant"):
@@ -447,6 +372,10 @@ async def main():
                 else:
                     message_placeholder.markdown("An error occurred while contacting the model.")
                     st.warning(str(e))
+        st.session_state.chat_history.append({"role": "assistant", "content": full_response})
+        new_agent_messages = st.session_state.pop("last_agent_new_messages", [])
+        if new_agent_messages:
+            st.session_state.agent_messages.extend(new_agent_messages)
         # Count served query
         increment_query_count()
 

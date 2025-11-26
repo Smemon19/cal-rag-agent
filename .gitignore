@@ -108,6 +108,8 @@ chroma_db/
 *.tmp
 *.temp 
 
+.pip-cache/
+
 # Generated diagnostics and large artifacts under docs
 docs/diag_run_*/
 docs/diag_run_ibc/

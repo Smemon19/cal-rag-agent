@@ -32,16 +32,15 @@ from utils import (
     make_chunk_metadata,
     get_env_file_path,
     ensure_appdata_scaffold,
-    get_default_chroma_dir,
     sanitize_and_validate_openai_key,
-    get_key_diagnostics,
-    format_results_as_context,
-    build_section_search_terms,
     resolve_collection_name,
+    create_embedding_function,
+    increment_query_count,
+    format_results_as_context,
 )
 from utils_vectorstore import get_vector_store, resolve_vector_backend, VectorStore
-from utils_tables import parse_markdown_table, pick_underlayment
-import itertools
+from rag_components import RetrievalOrchestrator
+
 from tools_calc import (
     deflection_limit,
     vehicle_barrier_reaction,
@@ -49,18 +48,26 @@ from tools_calc import (
     wind_speed_category,
     machinery_impact_factor,
 )
-from rules_loader import load_all_rules, find_rules_by_section, find_rules_by_keywords
+from rules_loader import load_all_rules
 from verify import verify_answer
 import json as _json
 import uuid as _uuid
-from utils import increment_query_count
+
+SECTION_PATTERN = re.compile(r"\b\d{3,4}(?:\.\d+)+\b")
+IRC_SECTION_PATTERN = re.compile(r"\bR\d{3}(?:\.\d+)+\b")
+QUESTION_STOPWORDS = {
+    "tell", "about", "what", "should", "know", "please", "thank", "thanks",
+    "need", "want", "hello", "hey", "hi", "help", "info", "information",
+    "building", "home", "house", "structure", "story", "stories", "bath",
+    "room", "rooms", "with", "for", "this", "that", "the", "and", "like",
+    "two", "three", "four"
+}
 
 # Ensure appdata scaffold; only load .env in local dev (not in container/App Hosting)
 # Default collection and repo DB directory unless CLI/env override
 try:
-    repo_chroma = str((Path(__file__).resolve().parent / "chroma_db").absolute())
-    if not os.getenv("CHROMA_DIR") and Path(repo_chroma).exists():
-        os.environ.setdefault("CHROMA_DIR", repo_chroma)
+    # Removed ChromaDB specific env var check
+    pass
 except Exception:
     pass
 os.environ.setdefault("RAG_COLLECTION_NAME", "docs_ibc_v2")
@@ -71,9 +78,9 @@ if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FI
         # Try repo .env first, then fall back to appdata .env
         repo_env = Path(__file__).resolve().parent / ".env"
         if repo_env.exists():
-            dotenv.load_dotenv(dotenv_path=repo_env, override=False)
+            dotenv.load_dotenv(dotenv_path=repo_env, override=True)
         else:
-            dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=False)
+            dotenv.load_dotenv(dotenv_path=get_env_file_path(), override=True)
     except Exception:
         pass
 
@@ -99,12 +106,11 @@ class RagAgent:
     """RAG Agent for handling document insertion from URLs and local files."""
 
     def __init__(self, collection_name: Optional[str] = None, db_directory: str = "",
-                 embedding_model: str = "all-MiniLM-L6-v2"):
+                 embedding_model: Optional[str] = None):
         # Resolve collection name with precedence: CLI > env > default
         resolved_collection = resolve_collection_name(collection_name)
         self.collection_name = resolved_collection
-        self.db_directory = db_directory or get_default_chroma_dir()
-        self.embedding_model = embedding_model
+        self.db_directory = db_directory
 
         # Resolve vector backend and create appropriate store
         backend_name, backend_config = resolve_vector_backend()
@@ -112,22 +118,11 @@ class RagAgent:
 
         # Log which embedding backend/model are active once during agent init
         emb_backend, emb_model = resolve_embedding_backend_and_model()
-        print(f"[agent] Embeddings backend='{emb_backend}', model='{emb_model}'")
+        self.embedding_model = embedding_model or emb_model
+        print(f"[agent] Embeddings backend='{emb_backend}', model='{self.embedding_model}'")
 
         # Create vector store based on backend
-        if backend_name == "bigquery":
-            self.vector_store = get_vector_store(backend="bigquery")
-        else:
-            # Default to Chroma
-            self.vector_store = get_vector_store(
-                backend="chroma",
-                persist_directory=self.db_directory,
-                collection_name=resolved_collection,
-            )
-            # For backward compatibility, keep these references for Chroma-based code
-            if hasattr(self.vector_store, 'client'):
-                self.client = self.vector_store.client
-                self.collection = self.vector_store.collection
+        self.vector_store = get_vector_store(backend="bigquery")
     
     def smart_chunk_markdown(self, markdown: str, max_len: int = 1000, overlap_chars: int = 150) -> List[str]:
         """Hierarchically split markdown by headers, then by characters with small overlap.
@@ -508,55 +503,22 @@ class RagAgent:
         return pieces
 
 
-# Create the RAG agent
 def create_agent():
     """Create the RAG agent with proper environment variable loading."""
     if Agent is None:
         raise ImportError(
             "pydantic_ai is required to create the agent. Install it or avoid calling create_agent() at import time."
         )
+    
+    # Ensure correct model choice is loaded
+    model_choice = os.getenv("MODEL_CHOICE", "gpt-4o-mini")
+    print(f"[agent] Initializing agent with model: {model_choice}")
+    
     return Agent(
-        os.getenv("MODEL_CHOICE", "gpt-4o-mini"),
+        model_choice,
         deps_type=RAGDeps,
-        system_prompt="""You are the CAL Engineering Assistant, an expert system for analyzing building codes, structural engineering standards, and construction specifications.
-
-CORE PRINCIPLES:
-1. **Accuracy First**: Always use the retrieve tool to search documentation before answering. Never guess code requirements.
-2. **Verbatim Citations**: Quote relevant sections, tables, and values exactly as they appear in the documentation.
-3. **Precision & Units**: Include all numeric values with their units (psf, psi, ft, in, mph, etc.).
-4. **Safety Emphasis**: Highlight safety factors, load combinations, and minimum requirements explicitly.
-5. **Section References**: Always cite the specific code section (e.g., "IBC 2018 §1607.9", "Table 1604.3").
-
-RESPONSE FORMAT:
-- Start with the direct answer citing the code section
-- Quote the exact relevant text from the code
-- Include all numeric values and units
-- Note any applicable safety factors or conditions
-- If using calculation tools, show inputs and outputs clearly
-
-WHEN DATA IS MISSING:
-- Explicitly state: "This information is not available in the current documentation."
-- Do NOT make up code requirements or standards
-- Do NOT substitute values from other codes unless explicitly requested
-- Suggest what additional documentation might be needed
-
-RULE SNIPPETS:
-- If context includes RULE SNIPPET sections, quote these verbatim first
-- Prioritize rule snippets over general code text
-- Cite the section number from the rule snippet
-
-CALCULATIONS:
-- Show all calculation steps when using tools
-- Format: "For [inputs]: [calculation] = [result] ([code reference])"
-- Example: "For 30 ft span with L/180: Max deflection = 2.0 in (IBC Table 1604.3)"
-
-STYLE:
-- Be concise and technical - engineers need facts, not explanations
-- Use proper engineering terminology
-- Prefer bullet points for multiple requirements
-- Bold key values and requirements for readability
-
-Remember: Your primary role is to provide accurate, citable information from building codes and engineering standards. When in doubt, retrieve more documentation rather than speculating."""
+        model_settings={"tool_choice": "required"},
+        system_prompt="You are the CAL Engineering Assistant. Always rely on the supplied context and tools; if the context lacks the answer, say so."
     )
 
 # Initialize agent as None and track the last key used to recreate if it changes
@@ -564,6 +526,216 @@ agent = None
 _last_openai_key = None
 _last_model_choice = None
 _last_retrieve_context: str = ""
+
+
+def build_retrieval_context(
+    question: str,
+    deps: RAGDeps,
+    *,
+    n_results: int = 5,
+    header_contains: Optional[str] = None,
+    source_contains: Optional[str] = None,
+) -> str:
+    """Retrieve context synchronously using the orchestrator and stash for verification."""
+    embed_fn = create_embedding_function()
+    orchestrator = RetrievalOrchestrator(deps.vector_store, embed_fn)
+
+    def _norm(value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    header_filter = _norm(header_contains) or _norm(getattr(deps, "header_contains", None))
+    source_filter = _norm(source_contains) or _norm(getattr(deps, "source_contains", None))
+
+    filters: Dict[str, str] = {}
+    if header_filter:
+        filters["header_contains"] = header_filter
+    if source_filter:
+        filters["source_contains"] = source_filter
+
+    section_tokens = orchestrator.preprocessor.extract_section_tokens(question)
+    table_ctx = orchestrator.lookup.lookup_tables(question, deps.vector_store, n_results)
+    rule_ctx = orchestrator.lookup.lookup_rules(section_tokens, question)
+
+    query_embedding = embed_fn([question])[0]
+    vec_res = deps.vector_store.vector_search(query_embedding, n_results=n_results, filters=filters or None)
+    kw_res = deps.vector_store.keyword_search(
+        orchestrator.preprocessor.build_search_terms(question),
+        max_results=max(3, n_results),
+    )
+    merged = orchestrator._merge_results(vec_res, kw_res, n_results)
+    formatted_context = format_results_as_context(merged)
+
+    structured_text, structured_entries = _build_structured_extracts(
+        question,
+        merged,
+        rule_text=rule_ctx
+    )
+
+    parts: List[str] = []
+    if structured_text:
+        parts.append(structured_text)
+    if rule_ctx:
+        parts.append(rule_ctx)
+    if table_ctx:
+        parts.append(table_ctx)
+    parts.append(formatted_context)
+
+    context_text = "\n\n".join(part for part in parts if part)
+
+    global _last_retrieve_context
+    _last_retrieve_context = context_text
+    increment_query_count()
+    return context_text, structured_entries
+
+
+def _build_structured_extracts(
+    question: str,
+    merged_results: Dict[str, Any],
+    max_entries: int = 10,
+    rule_text: str = "",
+) -> tuple[str, List[Dict[str, str]]]:
+    """Synthesize concise section/quote pairs from merged retrieval outputs."""
+    docs = merged_results.get("documents", [[]])[0]
+    metas = merged_results.get("metadatas", [[]])[0]
+
+    entries: List[str] = []
+    entry_objs: List[Dict[str, str]] = []
+    seen_sections: set[str] = set()
+
+    question_terms: set[str] = set()
+    if question:
+        raw_terms = re.findall(r"[a-zA-Z]{3,}", question.lower())
+        question_terms = {term for term in raw_terms if term not in QUESTION_STOPWORDS}
+
+    def _derive_code_label(meta: Dict[str, Any]) -> str:
+        title = (meta or {}).get("title", "") or ""
+        source_url = (meta or {}).get("source_url", "") or ""
+        text = f"{title} {source_url}".lower()
+        if "residential" in text or "irc" in text:
+            return "IRC 2018"
+        return "IBC 2018"
+
+    def _clean_quote(snippet: str) -> str:
+        snippet = snippet.replace(" | ", " ").replace("|", " ")
+        snippet = " ".join(snippet.split())
+        return snippet.strip()
+
+    def _extract_quote_for_token(text: str, token: str) -> str:
+        idx = text.lower().find(token.lower())
+        if idx == -1:
+            return _clean_quote(text[:220])
+        line_start = text.rfind("\n", 0, idx)
+        line_end = text.find("\n", idx)
+        if line_start == -1:
+            line_start = 0
+        if line_end == -1:
+            line_end = len(text)
+        line_snippet = text[line_start:line_end]
+        if len(line_snippet.strip()) > 40 and token in line_snippet:
+            snippet = line_snippet
+        else:
+            start = max(text.rfind(".", 0, idx), text.rfind("\n", 0, idx))
+            if start == -1:
+                start = max(0, idx - 140)
+            else:
+                start = max(0, start + 1)
+            end_period = text.find(".", idx)
+            end_newline = text.find("\n", idx)
+            candidates = [pos for pos in [end_period, end_newline] if pos != -1]
+            end = min(candidates) if candidates else idx + 200
+            snippet = text[start:end]
+            if len(snippet) < 40:
+                snippet = text[idx - 120: idx + 120]
+        return _clean_quote(snippet)
+
+    for doc, meta in zip(docs or [], metas or []):
+        if not doc:
+            continue
+        sections = SECTION_PATTERN.findall(doc)
+        sections += IRC_SECTION_PATTERN.findall(doc)
+        for section in sections:
+            if section in seen_sections:
+                continue
+            quote = _extract_quote_for_token(doc, section)
+            if not quote:
+                continue
+            if question_terms:
+                haystack = f"{quote} {(meta or {}).get('section_path', '')}".lower()
+                if not any(term in haystack for term in question_terms):
+                    continue
+            code_label = _derive_code_label(meta)
+            source = meta.get("title") or meta.get("source_url") or "Unknown source"
+            entries.append(f"- [{code_label} §{section}] \"{quote}\" (Source: {source})")
+            entry_objs.append({
+                "code_label": code_label,
+                "section": section,
+                "quote": quote,
+                "source": source,
+                "section_path": (meta or {}).get("section_path", ""),
+            })
+            seen_sections.add(section)
+            if len(entries) >= max_entries:
+                break
+        if len(entries) >= max_entries:
+            break
+
+    if not entries:
+        entries = []
+        entry_objs = []
+
+    if rule_text:
+        for rule_entry in _parse_rule_snippets(rule_text):
+            section = rule_entry["section"]
+            if section in seen_sections:
+                continue
+            entries.append(
+                f"- [{rule_entry['code_label']} §{section}] \"{rule_entry['quote']}\" (Source: {rule_entry['source']})"
+            )
+            entry_objs.append(rule_entry)
+            seen_sections.add(section)
+            if len(entries) >= max_entries:
+                break
+
+    if not entries:
+        return "", entry_objs
+
+    return "STRUCTURED CONTEXT EXTRACTS:\n" + "\n".join(entries), entry_objs
+
+
+def _parse_rule_snippets(rule_text: str) -> List[Dict[str, str]]:
+    entries: List[Dict[str, str]] = []
+    if not rule_text:
+        return entries
+    blocks = rule_text.split("RULE SNIPPET (")
+    for block in blocks[1:]:
+        header, _, body = block.partition("):")
+        header = header.strip()
+        body = body.strip()
+        if not header or not body:
+            continue
+        section_match = re.search(r"§([0-9R\.]+)", header)
+        if not section_match:
+            continue
+        section = section_match.group(1)
+        code_label = header.split("§")[0].strip()
+        bullets = []
+        for line in body.splitlines():
+            line = line.strip()
+            if line.startswith("- "):
+                bullets.append(line[2:])
+        if not bullets:
+            continue
+        quote = "; ".join(bullets)
+        entries.append({
+            "code_label": code_label,
+            "section": section,
+            "quote": quote,
+            "source": "rules/snippets",
+        })
+    return entries
 
 
 def get_agent():
@@ -607,304 +779,18 @@ async def retrieve(
         max_n_results = max(1, int(str(os.getenv("RETRIEVAL_N_RESULTS", str(n_results))).strip()))
     except Exception:
         max_n_results = max(1, n_results)
-    try:
-        max_chunks_for_context = max(1, int(str(os.getenv("MAX_CHUNKS_FOR_CONTEXT", "12")).strip()))
-    except Exception:
-        max_chunks_for_context = 12
-    try:
-        max_context_tokens = max(256, int(str(os.getenv("MAX_CONTEXT_TOKENS", "6000")).strip()))
-    except Exception:
-        max_context_tokens = 6000
-
-    import time
-    start_time = time.time()
-    breaker_triggered = False
-    request_id = str(_uuid.uuid4())
-
-    # Get vector store from dependencies
-    vector_store = context.deps.vector_store
+    
+    # Initialize orchestrator
+    embed_fn = create_embedding_function()
+    orchestrator = RetrievalOrchestrator(context.deps.vector_store, embed_fn)
+    
     # Ensure rules are loaded (no-op if already)
     try:
         load_all_rules("rules")
     except Exception:
         pass
-    # ===== Pre-vector: Specialized table lookup for certain materials and wind speeds =====
-    table_prefix_context: str = ""
-    try:
-        ql = (search_query or "").lower()
-        known_materials = [
-            # Slate
-            "slate shingles",
-            "slate shingle",
-            "slate shingle roof",
-            # Asphalt
-            "asphalt shingles",
-            "asphalt shingle",
-            "asphalt shingle roof",
-            # Vehicle barriers
-            "vehicle barrier",
-            "vehicle barriers",
-        ]
-        material_hit = next((m for m in known_materials if m in ql), None)
-        mph_match = re.search(r"(\d{2,3})\s*mph", ql)
-        wind_mph_val = int(mph_match.group(1)) if mph_match else None
 
-        if material_hit and wind_mph_val is not None:
-            # Scan candidate chunks by keyword for tables
-            substrings = [material_hit, "table", "underlayment", "1507"]
-            scan = vector_store.keyword_search(substrings, max_results=max(15, n_results))
-            docs = scan.get("documents", [[]])[0]
-            metas = scan.get("metadatas", [[]])[0]
-
-            chosen_value: Optional[str] = None
-            citation: str = ""
-
-            for doc, meta in zip(docs, metas):
-                for df in parse_markdown_table(doc or ""):
-                    val = pick_underlayment(df, material_hit, wind_mph_val)
-                    if val:
-                        chosen_value = val
-                        # Build citation: try to detect table number and code name
-                        table_num = None
-                        m = re.search(r"\btable\s+([0-9]+(?:\.[0-9]+)*)", (doc or ""), flags=re.IGNORECASE)
-                        if m:
-                            table_num = m.group(1)
-                        else:
-                            sp = str((meta or {}).get("section_path") or (meta or {}).get("headers") or "")
-                            m2 = re.search(r"([0-9]+(?:\.[0-9]+)+)", sp)
-                            if m2:
-                                table_num = m2.group(1)
-
-                        title = str((meta or {}).get("title") or "")
-                        src = str((meta or {}).get("source_url") or "")
-                        code_short = ""
-                        mapping = [
-                            ("international building code", "IBC"),
-                            ("international existing building code", "IEBC"),
-                            ("international residential code", "IRC"),
-                        ]
-                        hay = f"{title} {src}".lower()
-                        for needle, short in mapping:
-                            if needle in hay:
-                                code_short = short
-                                break
-                        if code_short and table_num:
-                            citation = f"{code_short} Table {table_num}"
-                        elif table_num:
-                            citation = f"Table {table_num}"
-                        elif code_short:
-                            citation = code_short
-                        else:
-                            citation = "Table lookup"
-
-                        # Compose prefix context
-                        mat_pretty = material_hit
-                        table_prefix_context = (
-                            f"TABLE LOOKUP RESULT: Underlayment for '{mat_pretty}' at wind speed {wind_mph_val} mph: {chosen_value} ({citation})\n\n"
-                        )
-                        print(f"[table_lookup] match material='{mat_pretty}' wind_mph={wind_mph_val} -> '{chosen_value}' [{citation}]")
-                        break
-                if chosen_value:
-                    break
-    except Exception as e:
-        # Fail open; do not block retrieval on table parsing errors
-        print(f"[table_lookup] Error during table scan: {e}")
-
-    # ===== Section locking: restrict candidates to chunks matching section tokens =====
-    section_tokens = re.findall(r"\b\d+(?:\.\d+)+\b", search_query or "")
-    lock_applied = False
-    lock_candidates = None
-    if section_tokens:
-        # Build ordered fallbacks: for each token, include itself then shorter prefixes
-        def prefixes(tok: str) -> List[str]:
-            parts = tok.split('.')
-            out = [tok]
-            if len(parts) >= 2:
-                out.append('.'.join(parts[:2]))
-            if len(parts) >= 1:
-                out.append(parts[0])
-            # Dedup preserve order
-            seen = set()
-            res = []
-            for t in out:
-                if t not in seen:
-                    seen.add(t)
-                    res.append(t)
-            return res
-
-        token_fallbacks = [prefixes(t) for t in section_tokens]
-        # Flatten by priority tiers across tokens: first try full sections for all, etc.
-        tiers = list(itertools.zip_longest(*token_fallbacks))
-        tiers_flat: List[str] = []
-        for tier in tiers:
-            for t in tier:
-                if t:
-                    tiers_flat.append(t)
-
-        # Initial candidate pool: vector + keyword merge similar to below but larger for filtering
-        # For vector search, we need embeddings
-        from utils import create_embedding_function
-        embed_fn = create_embedding_function()
-        query_embedding = embed_fn([search_query])[0]
-
-        base_results = vector_store.vector_search(query_embedding, n_results=max(n_results, 25))
-        base_ids = [*base_results.get("ids", [[]])[0]]
-        base_docs = [*base_results.get("documents", [[]])[0]]
-        base_metas = [*base_results.get("metadatas", [[]])[0]]
-
-        # Add keyword scan candidates to broaden the pool
-        kw_scan = vector_store.keyword_search([search_query], max_results=100)
-        for i, id_ in enumerate(kw_scan.get("ids", [[]])[0]):
-            if id_ not in base_ids:
-                base_ids.append(id_)
-                base_docs.append(kw_scan.get("documents", [[]])[0][i])
-                base_metas.append(kw_scan.get("metadatas", [[]])[0][i])
-
-        total_before = len(base_ids)
-
-        kept_ids: List[str] = []
-        kept_docs: List[str] = []
-        kept_metas: List[Dict[str, Any]] = []
-
-        # Try tiers in order until we have any matches
-        for tier_token in tiers_flat:
-            ids_t: List[str] = []
-            docs_t: List[str] = []
-            metas_t: List[Dict[str, Any]] = []
-            tt_l = tier_token.lower()
-            for id_, doc, meta in zip(base_ids, base_docs, base_metas):
-                meta = meta or {}
-                header_text = str(meta.get("section_path") or meta.get("headers") or meta.get("title") or meta.get("header") or "")
-                text = f"{header_text}\n{doc}".lower()
-                if tt_l in text:
-                    ids_t.append(id_)
-                    docs_t.append(doc)
-                    metas_t.append(meta)
-            if ids_t:
-                kept_ids, kept_docs, kept_metas = ids_t, docs_t, metas_t
-                lock_applied = True
-                print(f"[retrieve] section_lock applied: tokens=['{tier_token}']; kept={len(kept_ids)}/{total_before} candidates")
-                break
-
-        if lock_applied:
-            lock_candidates = {
-                "ids": [kept_ids[:n_results]],
-                "documents": [kept_docs[:n_results]],
-                "metadatas": [kept_metas[:n_results]],
-                "distances": [[0.0] * min(n_results, len(kept_ids))],
-            }
-
-    # ===== Rule snippets injection (before formatting/vector context) =====
-    rules_prefix_context: str = ""
-    try:
-        # Prefer exact section tokens; else keyword-based search
-        rule_hits: List[Dict[str, Any]] = []
-        if section_tokens:
-            # Try exact then prefixes
-            for tok in section_tokens:
-                # exact
-                rh = find_rules_by_section(tok)
-                if rh:
-                    rule_hits = rh
-                    break
-                # prefix fallbacks
-                parts = tok.split('.')
-                for i in range(len(parts)-1, 0, -1):
-                    prefix = '.'.join(parts[:i])
-                    rh = find_rules_by_section(prefix)
-                    if rh:
-                        rule_hits = rh
-                        break
-                if rule_hits:
-                    break
-        if not rule_hits:
-            # Keyword-based lookup with simple tokens from the query
-            kw_tokens = re.findall(r"[a-zA-Z]+", search_query or "")
-            candidates = find_rules_by_keywords(kw_tokens)
-            if candidates:
-                # take the highest-scoring rule group
-                top_rule = candidates[0][0]
-                rule_hits = [top_rule]
-
-        if rule_hits:
-            # For simplicity, display the first matching rule (could be extended)
-            r = rule_hits[0]
-            sec = str(r.get("sec") or "").strip()
-            title = str(r.get("title") or "").strip()
-            ver = str(r.get("version") or "").strip()
-            items = r.get("items", []) or []
-            header = f"RULE SNIPPET ({ver} §{sec} – {title}):\n"
-            lines = []
-            for it in items:
-                label = str(it.get("label") or "").strip()
-                value = str(it.get("value") or "").strip()
-                note = str(it.get("note") or "").strip()
-                if note:
-                    lines.append(f"- {label}: {value} ({note})")
-                else:
-                    lines.append(f"- {label}: {value}")
-            rules_prefix_context = header + "\n".join(lines) + "\n\n"
-
-            # Log injected snippet
-            tokens_preview = re.findall(r"[a-zA-Z]+", search_query or "")[:5]
-            print(f"[rules] injected §{sec} ({len(items)} items) for query tokens={tokens_preview}")
-    except Exception as e:
-        print(f"[rules] Error during snippet injection: {e}")
-
-    # Vector query first (bounded)
-    n_results = min(n_results, max_n_results)
-
-    # Create embeddings for vector search
-    from utils import create_embedding_function
-    embed_fn = create_embedding_function()
-    query_embedding = embed_fn([search_query])[0]
-
-    query_results = vector_store.vector_search(query_embedding, n_results=n_results)
-
-    # Hybrid fallback for numeric/table/section queries
-    section_terms = build_section_search_terms(search_query)
-    kw_results = vector_store.keyword_search(section_terms, max_results=max(3, n_results))
-
-    # Merge vector and keyword hits (dedupe by id, prefer vector order)
-    # Apply candidate discipline: cap candidates before rerank/format
-    try:
-        candidate_cap_raw = os.getenv("VECTOR_CANDIDATE_CAP", "50")
-        candidate_cap = max(1, int(str(candidate_cap_raw).strip()))
-    except Exception:
-        candidate_cap = 50
-    vec_ids = [*query_results.get("ids", [[]])[0]]
-    vec_docs = [*query_results.get("documents", [[]])[0]]
-    vec_metas = [*query_results.get("metadatas", [[]])[0]]
-
-    kw_ids = kw_results.get("ids", [[]])[0]
-    kw_docs = kw_results.get("documents", [[]])[0]
-    kw_metas = kw_results.get("metadatas", [[]])[0]
-
-    seen = set(vec_ids)
-    for i, id_ in enumerate(kw_ids):
-        if id_ not in seen:
-            vec_ids.append(id_)
-            vec_docs.append(kw_docs[i])
-            vec_metas.append(kw_metas[i])
-            seen.add(id_)
-
-    # Cap candidates feeding downstream steps
-    candidates_from_vector = len(vec_ids)
-    if len(vec_ids) > candidate_cap:
-        vec_ids = vec_ids[:candidate_cap]
-        vec_docs = vec_docs[:candidate_cap]
-        vec_metas = vec_metas[:candidate_cap]
-    try:
-        print({
-            "where": "retrieval",
-            "action": "candidate_cap",
-            "candidates_from_vector": candidates_from_vector,
-            "candidates_after_cap": len(vec_ids),
-        })
-    except Exception:
-        pass
-
-    # Coalesce filter values: tool args override deps; treat blank/whitespace as None
+    # Coalesce filter values
     def _norm(s: Optional[str]) -> Optional[str]:
         if s is None:
             return None
@@ -913,243 +799,46 @@ async def retrieve(
 
     header_filter = _norm(header_contains) or _norm(getattr(context.deps, "header_contains", None))
     source_filter = _norm(source_contains) or _norm(getattr(context.deps, "source_contains", None))
-
-    before_count = len(vec_ids)
-
-    # Apply case-insensitive filtering if any filter is active
-    if header_filter or source_filter:
-        hf = header_filter.lower() if header_filter else None
-        sf = source_filter.lower() if source_filter else None
-
-        filtered_ids: List[str] = []
-        filtered_docs: List[str] = []
-        filtered_metas: List[Dict[str, Any]] = []
-
-        for id_, doc, meta in zip(vec_ids, vec_docs, vec_metas):
-            meta = meta or {}
-            # Header fallback: section_path -> headers -> title -> header
-            header_text = str(meta.get("section_path") or meta.get("headers") or meta.get("title") or meta.get("header") or "")
-            header_text_l = header_text.lower()
-            # Source fallback: source_url -> source -> file_path
-            source_text = str(meta.get("source_url") or meta.get("source") or meta.get("file_path") or "")
-            source_text_l = source_text.lower()
-
-            ok_header = True if hf is None else (hf in header_text_l)
-            ok_source = True if sf is None else (sf in source_text_l)
-
-            if ok_header and ok_source:
-                filtered_ids.append(id_)
-                filtered_docs.append(doc)
-                filtered_metas.append(meta)
-
-        vec_ids, vec_docs, vec_metas = filtered_ids, filtered_docs, filtered_metas
-
-        after_count = len(vec_ids)
-        short_warn = ""
-        if (header_filter and len(header_filter) < 2) or (source_filter and len(source_filter) < 2):
-            short_warn = " (warning: very short filters can be noisy)"
-        print(
-            f"[retrieve] Filters header_contains='{header_filter or ''}', source_contains='{source_filter or ''}' candidates={before_count} -> filtered={after_count}{short_warn}"
-        )
-
-    # Handle no results after filtering
-    if not vec_ids:
-        notice = "No results matched the current filters. Consider removing or relaxing filters."
-        if header_filter or source_filter:
-            details = []
-            if header_filter:
-                details.append(f"header_contains='{header_filter}'")
-            if source_filter:
-                details.append(f"source_contains='{source_filter}'")
-            if details:
-                notice += " (" + ", ".join(details) + ")"
-        query_results = {
-            "ids": [["no-matches"]],
-            "documents": [[notice]],
-            "metadatas": [[{}]],
-            "distances": [[0.0]],
-        }
-        return format_results_as_context(query_results)
-
-    # Trim to n_results after optional filtering or section lock
-    if lock_candidates:
-        query_results = lock_candidates
-    else:
-        query_results = {
-            "ids": [vec_ids[:n_results]],
-            "documents": [vec_docs[:n_results]],
-            "metadatas": [vec_metas[:n_results]],
-            "distances": [[0.0] * min(n_results, len(vec_ids))],  # placeholder
-        }
     
-    # Format the results as context (prepend rules and table lookup if available)
-    # Guard against huge contexts by limiting number of chunks
-    if len(query_results.get("documents", [[]])[0]) > max_chunks_for_context:
-        # Trim
-        query_results = {
-            "ids": [query_results["ids"][0][:max_chunks_for_context]],
-            "documents": [query_results["documents"][0][:max_chunks_for_context]],
-            "metadatas": [query_results["metadatas"][0][:max_chunks_for_context]],
-            "distances": [query_results.get("distances", [[0.0]])[0][:max_chunks_for_context]],
-        }
-    # Optional dedup by (source_url, page_number)
-    docs = query_results.get("documents", [[]])[0]
-    metas = query_results.get("metadatas", [[]])[0]
-    seen_pairs = set()
-    dedup_docs: List[str] = []
-    dedup_metas: List[Dict[str, Any]] = []
-    for d, m in zip(docs, metas):
-        key = (str((m or {}).get("source_url", "")), str((m or {}).get("page_number", "")))
-        if key not in seen_pairs:
-            seen_pairs.add(key)
-            dedup_docs.append(d)
-            dedup_metas.append(m)
-    deduped_count = len(docs) - len(dedup_docs)
-    query_results = {
-        "ids": [query_results.get("ids", [[]])[0][:len(dedup_docs)]],
-        "documents": [dedup_docs],
-        "metadatas": [dedup_metas],
-        "distances": [query_results.get("distances", [[0.0]])[0][:len(dedup_docs)]],
-    }
-    base_ctx = format_results_as_context(query_results)
+    filters = {}
+    if header_filter: filters["header_contains"] = header_filter
+    if source_filter: filters["source_contains"] = source_filter
 
-    # Rough token estimate (~4 chars per token)
-    # Trim overly long individual chunks prior to token cap to reduce spikes
     try:
-        per_chunk_char_limit_raw = os.getenv("PER_CHUNK_CHAR_LIMIT", "4000")
-        per_chunk_char_limit = max(500, int(str(per_chunk_char_limit_raw).strip()))
-    except Exception:
-        per_chunk_char_limit = 4000
-    trimmed_chunks_count = 0
-    if any(len(d or "") > per_chunk_char_limit for d in dedup_docs):
-        trimmed_docs = []
-        for d in dedup_docs:
-            if len(d or "") > per_chunk_char_limit:
-                trimmed_docs.append((d or "")[:per_chunk_char_limit])
-                trimmed_chunks_count += 1
-            else:
-                trimmed_docs.append(d)
-        query_results["documents"] = [trimmed_docs]
-        base_ctx = format_results_as_context(query_results)
-
-    est_tokens = max(1, len(base_ctx) // 4)
-    if est_tokens > max_context_tokens:
-        breaker_triggered = True
-        elapsed = time.time() - start_time
-        try:
-            print({
-                "where": "retrieval",
-                "action": "circuit_breaker",
-                "n_results_requested": n_results,
-                "n_results_returned": len(query_results.get("documents", [[]])[0]),
-                "chunks_used": len(query_results.get("documents", [[]])[0]),
-                "tokens_in_context": est_tokens,
-                "circuit_breaker_triggered": True,
-                "elapsed_sec": round(elapsed, 3),
-            })
-        except Exception:
-            pass
-        # Per-request structured log without PII
-        try:
-            print(_json.dumps({
-                "ts": time.time(),
-                "request_id": request_id,
-                "elapsed_ms": int(elapsed * 1000),
-                "query_chars": len(search_query or ""),
-                "embed_cache_hit": None,  # unknown here
-                "embed_batches": None,
-                "batch_size": None,
-                "prefilter_count": None,
-                "prefilter_limit": os.getenv("KEYWORD_PREFILTER_LIMIT", ""),
-                "prefilter_fallback": None,
-                "n_results_requested": n_results,
-                "n_results_returned": len(query_results.get("documents", [[]])[0]),
-                "candidates_from_vector": None,
-                "candidates_after_cap": None,
-                "deduped_count": None,
-                "trimmed_chunks_count": None,
-                "chunks_used": len(query_results.get("documents", [[]])[0]),
-                "tokens_in_context": est_tokens,
-                "circuit_breaker_triggered": True,
-                "errors": "context_limit",
-            }))
-        except Exception:
-            pass
-        return (
-            "Your request would exceed our current context limits."
-            " Please narrow the question or specify a section/table so I can retrieve fewer chunks."
+        final_ctx = orchestrator.retrieve(
+            query=search_query,
+            n_results=min(n_results, max_n_results),
+            filters=filters
         )
-    prefix = ""
-    if rules_prefix_context:
-        prefix += rules_prefix_context
-    if table_prefix_context:
-        prefix += table_prefix_context
-    final_ctx = (prefix + base_ctx) if prefix else base_ctx
-    # Stash for verification step
-    global _last_retrieve_context
-    _last_retrieve_context = final_ctx
-    elapsed = time.time() - start_time
-    try:
-        print({
-            "where": "retrieval",
-            "action": "stats",
-            "n_results_requested": n_results,
-            "n_results_returned": len(query_results.get("documents", [[]])[0]),
-            "chunks_used": len(query_results.get("documents", [[]])[0]),
-            "tokens_in_context": est_tokens,
-            "circuit_breaker_triggered": breaker_triggered,
-            "elapsed_sec": round(elapsed, 3),
-            "deduped_count": deduped_count,
-            "trimmed_chunks_count": trimmed_chunks_count,
-        })
-    except Exception:
-        pass
-    # Per-request structured log without PII
-    try:
-        print(_json.dumps({
-            "ts": time.time(),
-            "request_id": request_id,
-            "elapsed_ms": int(elapsed * 1000),
-            "query_chars": len(search_query or ""),
-            "embed_cache_hit": None,
-            "embed_batches": None,
-            "batch_size": None,
-            "prefilter_count": None,
-            "prefilter_limit": os.getenv("KEYWORD_PREFILTER_LIMIT", ""),
-            "prefilter_fallback": None,
-            "n_results_requested": n_results,
-            "n_results_returned": len(query_results.get("documents", [[]])[0]),
-            "candidates_from_vector": candidates_from_vector,
-            "candidates_after_cap": len(query_results.get("documents", [[]])[0]),
-            "deduped_count": deduped_count,
-            "trimmed_chunks_count": trimmed_chunks_count,
-            "chunks_used": len(query_results.get("documents", [[]])[0]),
-            "tokens_in_context": est_tokens,
-            "circuit_breaker_triggered": breaker_triggered,
-            "errors": None,
-        }))
-    except Exception:
-        pass
-    increment_query_count()
-    return final_ctx
+        
+        # Stash for verification step
+        global _last_retrieve_context
+        _last_retrieve_context = final_ctx
+        
+        increment_query_count()
+        return final_ctx
+        
+    except Exception as e:
+        print(f"[retrieve] Error: {e}")
+        return "Error retrieving documents. Please try again."
 
 
 def _register_tools(agent_instance: Agent) -> None:
     """Register all tools on the provided agent instance."""
     agent_instance.tool(retrieve)
     # Calculation tools (pure functions; no RunContext)
-    agent_instance.tool(deflection_limit)
-    agent_instance.tool(vehicle_barrier_reaction)
-    agent_instance.tool(fall_anchor_design_load)
-    agent_instance.tool(wind_speed_category)
-    agent_instance.tool(machinery_impact_factor)
+    agent_instance.tool_plain(deflection_limit)
+    agent_instance.tool_plain(vehicle_barrier_reaction)
+    agent_instance.tool_plain(fall_anchor_design_load)
+    agent_instance.tool_plain(wind_speed_category)
+    agent_instance.tool_plain(machinery_impact_factor)
 
 
 async def run_rag_agent(
     question: str,
     collection_name: Optional[str] = None,
     db_directory: str = "",
-    embedding_model: str = "all-MiniLM-L6-v2",
+    embedding_model: Optional[str] = None,
     n_results: int = 5
 ) -> str:
     """Run the RAG agent to answer a question.
@@ -1173,26 +862,64 @@ async def run_rag_agent(
     if backend_name == "bigquery":
         vector_store = get_vector_store(backend="bigquery")
     else:
-        vector_store = get_vector_store(
-            backend="chroma",
-            persist_directory=db_directory or get_default_chroma_dir(),
-            collection_name=resolved_collection,
-        )
+        # Fallback to BigQuery if unknown backend is resolved, or error out.
+        # Since we removed Chroma, we default to BigQuery.
+        vector_store = get_vector_store(backend="bigquery")
 
     # Create dependencies
+    _, detected_model = resolve_embedding_backend_and_model()
+    effective_model = embedding_model or detected_model
+
     deps = RAGDeps(
         vector_store=vector_store,
-        embedding_model=embedding_model,
+        embedding_model=effective_model,
         collection_name=resolved_collection if backend_name == "chroma" else "docs_ibc_v2",
         vector_backend=backend_name
     )
-    
-    # First draft
-    result = await get_agent().run(question, deps=deps)
+
+    context_text, context_entries = build_retrieval_context(
+        question,
+        deps,
+        n_results=n_results,
+        header_contains=getattr(deps, "header_contains", None),
+        source_contains=getattr(deps, "source_contains", None),
+    )
+
+    if not context_text.strip():
+        fallback_prompt = (
+            "You do not have any retrieved reference material to cite. Respond to the user's question "
+            "using your general building-code expertise. If the question requires specific code references "
+            "that you cannot confirm, acknowledge that while still providing helpful guidance."
+        )
+        result = await get_agent().run(
+            f"{fallback_prompt}\n\nUser question: {question}",
+            deps=deps,
+            model_settings={"temperature": 0.4},
+        )
+        return result.data
+
+    augmented_question = (
+        "Answer the user using ONLY the context provided. Cite sections in plain text (e.g., "
+        "\"IBC 2018 §1507.2\") when possible. If the context does not contain the answer, reply "
+        "with \"I don't have that information in the current documentation.\" Use a natural tone.\n\n"
+        f"Context:\n{context_text}\n\nUser question: {question}"
+    )
+    result = await get_agent().run(augmented_question, deps=deps, model_settings={"temperature": 0.2})
     answer_text = result.data
 
+    if context_entries:
+        verification_context = "\n".join(
+            f"{entry.get('code_label', '')} §{entry.get('section', '')} {entry.get('quote', '')}"
+            for entry in context_entries
+        )
+    else:
+        verification_context = context_text
+
+    global _last_retrieve_context
+    _last_retrieve_context = verification_context
+
     # Verify against last retrieval context
-    ctx_text = _last_retrieve_context or ""
+    ctx_text = verification_context or ""
     try:
         ver = verify_answer(answer_text, ctx_text)
     except Exception as e:
@@ -1208,6 +935,10 @@ async def run_rag_agent(
     mis_nums = missing.get("nums", []) or []
     mis_stds = missing.get("standards", []) or []
     print(f"[verify] missing sections={mis_sections} nums={mis_nums} standards={mis_stds}")
+
+    if context_entries:
+        # Deterministic extract already returned; skip LLM retry to avoid hallucinations.
+        return answer_text
 
     # One focused retry with hint and keyword expansion
     retry_tokens: List[str] = [*mis_sections, *mis_nums, *mis_stds]
@@ -1248,7 +979,7 @@ def main():
     parser.add_argument("--question", help="The question to answer about Pydantic AI")
     parser.add_argument("--collection", default=None, help="Name of the ChromaDB collection (overrides env)")
     parser.add_argument("--db-dir", default="", help="Directory where ChromaDB data is stored (default: AppData)")
-    parser.add_argument("--embedding-model", default="all-MiniLM-L6-v2", help="Name of the embedding model to use")
+    parser.add_argument("--embedding-model", default=None, help="Name of the embedding model to use (auto if omitted)")
     parser.add_argument("--n-results", type=int, default=5, help="Number of results to return from the retrieval")
     
     args = parser.parse_args()
@@ -1261,8 +992,8 @@ def main():
     response = asyncio.run(run_rag_agent(
         args.question,
         collection_name=resolved_name,
-        db_directory=args.db_dir or get_default_chroma_dir(),
-        embedding_model=args.embedding_model,
+        db_directory=args.db_dir,
+        embedding_model=(args.embedding_model or None),
         n_results=args.n_results
     ))
     

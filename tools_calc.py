@@ -18,7 +18,7 @@ ureg = UnitRegistry()
 Q_ = ureg.Quantity
 
 
-def deflection_limit(context: Any, span_ft: float, limit: str) -> float:
+def deflection_limit(span_ft: float, limit: str) -> float:
     """Compute the maximum allowed deflection in inches given span (ft) and a ratio like 'L/180'.
 
     Args:
@@ -51,7 +51,7 @@ def deflection_limit(context: Any, span_ft: float, limit: str) -> float:
     return float(max_defl_in)
 
 
-def vehicle_barrier_reaction(context: Any, load_lbs: float = 6000) -> Dict[str, Any]:
+def vehicle_barrier_reaction(load_lbs: float = 6000) -> Dict[str, Any]:
     """Return the standard vehicle barrier design load in both pounds and kN.
 
     Args:
@@ -67,7 +67,7 @@ def vehicle_barrier_reaction(context: Any, load_lbs: float = 6000) -> Dict[str, 
     return {"pounds": float(load_lbs), "kN": float(round(kn, 1))}
 
 
-def fall_anchor_design_load(context: Any, persons: int = 1) -> Dict[str, Any]:
+def fall_anchor_design_load(persons: int = 1) -> Dict[str, Any]:
     """Compute design load for fall protection anchors.
 
     Args:
@@ -83,7 +83,7 @@ def fall_anchor_design_load(context: Any, persons: int = 1) -> Dict[str, Any]:
     return {"pounds": float(total_lb), "kN": float(round(kn, 1))}
 
 
-def wind_speed_category(context: Any, v_mph: float) -> str:
+def wind_speed_category(v_mph: float) -> str:
     """Categorize wind speed for underlayment tables.
 
     Args:
@@ -97,7 +97,7 @@ def wind_speed_category(context: Any, v_mph: float) -> str:
     return "V ≥ 140 mph"
 
 
-def machinery_impact_factor(context: Any, machine_type: str) -> Dict[str, Any]:
+def machinery_impact_factor(machine_type: str) -> Dict[str, Any]:
     """Return impact factor for machinery loads per IBC 1607.10.2.
 
     Args:

@@ -15,6 +15,7 @@ from google.cloud.bigquery import Client
 # Cache for BigQuery client
 _BQ_CLIENT_CACHE: Optional[Client] = None
 _BQ_LAST_STATUS: Dict[str, Any] = {}
+_BQ_EMBED_CONFIG_CACHE: Dict[tuple[str, str, str], tuple[Optional[str], Optional[str]]] = {}
 
 
 def get_bq_project() -> str:
@@ -35,6 +36,59 @@ def get_bq_table() -> str:
 def get_full_table_id() -> str:
     """Get fully qualified BigQuery table ID."""
     return f"{get_bq_project()}.{get_bq_dataset()}.{get_bq_table()}"
+
+
+def get_table_embedding_config(
+    project: Optional[str] = None,
+    dataset: Optional[str] = None,
+    table: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Return (embedding_backend, embedding_model) metadata stored with documents.
+
+    Results are cached per table to avoid repeated metadata queries.
+    """
+    global _BQ_EMBED_CONFIG_CACHE
+
+    proj = project or get_bq_project()
+    ds = dataset or get_bq_dataset()
+    tbl = table or get_bq_table()
+    cache_key = (proj, ds, tbl)
+
+    if cache_key in _BQ_EMBED_CONFIG_CACHE:
+        return _BQ_EMBED_CONFIG_CACHE[cache_key]
+
+    client = get_bq_client(proj)
+    full_table = f"{proj}.{ds}.{tbl}"
+
+    query = f"""
+    SELECT
+        embedding_backend,
+        embedding_model
+    FROM `{full_table}`
+    WHERE embedding_backend IS NOT NULL
+    LIMIT 1
+    """
+
+    try:
+        results = list(client.query(query).result())
+        if not results:
+            _BQ_EMBED_CONFIG_CACHE[cache_key] = (None, None)
+            return (None, None)
+
+        row = results[0]
+        backend = str(row.get("embedding_backend") or "").strip() or None
+        model = str(row.get("embedding_model") or "").strip() or None
+        _BQ_EMBED_CONFIG_CACHE[cache_key] = (backend, model)
+        return backend, model
+    except Exception as e:
+        print(json.dumps({
+            "where": "bigquery",
+            "action": "embedding_config_error",
+            "error": str(e),
+            "table": full_table,
+        }))
+        _BQ_EMBED_CONFIG_CACHE[cache_key] = (None, None)
+        return (None, None)
 
 
 def get_bq_client(project: Optional[str] = None) -> Client:
@@ -149,128 +203,119 @@ def vector_search(
     """
     client = get_bq_client(project)
 
-    # Build table identifier
     proj = project or get_bq_project()
     ds = dataset or get_bq_dataset()
     tbl = table or get_bq_table()
     full_table = f"{proj}.{ds}.{tbl}"
 
-    # Build WHERE clause for filters
-    where_clauses = []
-    query_params = []
+    # Allow fetching extra candidates so post-filters still return enough rows
+    candidate_limit = max(limit, min(limit * 5, 200))
+
+    where_clauses: List[str] = []
+    query_params: List[bigquery.ScalarQueryParameter] = []
 
     if filters:
-        # Handle source_contains filter
-        if "source_contains" in filters and filters["source_contains"]:
-            where_clauses.append("LOWER(source_url) LIKE @source_pattern")
+        src = filters.get("source_contains")
+        if src:
+            where_clauses.append("LOWER(vs.base.source_url) LIKE @source_pattern")
             query_params.append(
-                bigquery.ScalarQueryParameter(
-                    "source_pattern", "STRING", f"%{filters['source_contains'].lower()}%"
-                )
+                bigquery.ScalarQueryParameter("source_pattern", "STRING", f"%{src.lower()}%")
             )
-
-        # Handle header_contains filter (check metadata JSON)
-        if "header_contains" in filters and filters["header_contains"]:
+        hdr = filters.get("header_contains")
+        if hdr:
             where_clauses.append(
-                "(LOWER(JSON_EXTRACT_SCALAR(metadata, '$.section_path')) LIKE @header_pattern "
-                "OR LOWER(JSON_EXTRACT_SCALAR(metadata, '$.headers')) LIKE @header_pattern "
-                "OR LOWER(JSON_EXTRACT_SCALAR(metadata, '$.title')) LIKE @header_pattern)"
+                "("
+                "LOWER(vs.base.section_path) LIKE @header_pattern OR "
+                "LOWER(vs.base.headers) LIKE @header_pattern OR "
+                "LOWER(vs.base.title) LIKE @header_pattern"
+                ")"
             )
             query_params.append(
-                bigquery.ScalarQueryParameter(
-                    "header_pattern", "STRING", f"%{filters['header_contains'].lower()}%"
-                )
+                bigquery.ScalarQueryParameter("header_pattern", "STRING", f"%{hdr.lower()}%")
             )
 
     where_clause = ""
     if where_clauses:
         where_clause = "WHERE " + " AND ".join(where_clauses)
 
-    # Build vector search query using VECTOR_SEARCH function if index exists,
-    # otherwise fall back to manual distance calculation
-    # For now, we'll use manual calculation for compatibility
     query = f"""
-    WITH distances AS (
-        SELECT
-            chunk_id,
-            content,
-            source_url,
-            metadata,
-            -- Cosine similarity using dot product (assuming normalized embeddings)
-            (
-                SELECT SUM(e1 * e2)
-                FROM UNNEST(embedding) AS e1 WITH OFFSET pos1
-                JOIN UNNEST(@query_embedding) AS e2 WITH OFFSET pos2
-                ON pos1 = pos2
-            ) AS similarity,
-            -- Euclidean distance as fallback
-            SQRT(
-                (
-                    SELECT SUM(POW(e1 - e2, 2))
-                    FROM UNNEST(embedding) AS e1 WITH OFFSET pos1
-                    JOIN UNNEST(@query_embedding) AS e2 WITH OFFSET pos2
-                    ON pos1 = pos2
-                )
-            ) AS distance
-        FROM `{full_table}`
-        {where_clause}
-    )
     SELECT
-        chunk_id,
-        content,
-        source_url,
-        metadata,
-        similarity,
-        distance,
-        (1 - similarity) AS cosine_distance
-    FROM distances
-    ORDER BY similarity DESC
+        vs.base.chunk_id AS chunk_id,
+        vs.base.content AS content,
+        vs.base.source_url AS source_url,
+        vs.base.source_type AS source_type,
+        vs.base.section_path AS section_path,
+        vs.base.headers AS headers,
+        vs.base.page_number AS page_number,
+        vs.base.title AS title,
+        vs.base.mime_type AS mime_type,
+        vs.base.char_count AS char_count,
+        vs.base.word_count AS word_count,
+        vs.base.content_preview AS content_preview,
+        vs.base.embedding_backend AS embedding_backend,
+        vs.base.embedding_model AS embedding_model,
+        vs.base.inserted_at AS inserted_at,
+        vs.distance AS distance,
+        1 - vs.distance AS similarity
+    FROM VECTOR_SEARCH(
+        TABLE `{full_table}`,
+        'embedding',
+        (SELECT @query_embedding),
+        top_k => @candidate_limit
+    ) AS vs
+    {where_clause}
+    ORDER BY distance ASC
     LIMIT @limit
     """
 
-    # Configure query parameters
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
             bigquery.ArrayQueryParameter("query_embedding", "FLOAT64", query_embedding),
+            bigquery.ScalarQueryParameter("candidate_limit", "INT64", candidate_limit),
             bigquery.ScalarQueryParameter("limit", "INT64", limit),
         ] + query_params
     )
 
-    # Execute query
     try:
         start_time = datetime.now()
         query_job = client.query(query, job_config=job_config)
         results = list(query_job.result())
         elapsed_ms = int((datetime.now() - start_time).total_seconds() * 1000)
 
-        # Log query execution
         print(json.dumps({
             "where": "bigquery",
             "action": "vector_search",
             "results_count": len(results),
             "limit": limit,
+            "candidate_limit": candidate_limit,
             "elapsed_ms": elapsed_ms,
             "filters_applied": bool(filters),
         }))
 
-        # Convert to expected format
         output = []
         for row in results:
-            # Parse metadata if it's a string
-            metadata = row["metadata"]
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except:
-                    metadata = {}
-
+            metadata = {
+                "source_url": row.get("source_url"),
+                "source_type": row.get("source_type"),
+                "section_path": row.get("section_path"),
+                "headers": row.get("headers"),
+                "page_number": row.get("page_number"),
+                "title": row.get("title"),
+                "mime_type": row.get("mime_type"),
+                "char_count": row.get("char_count"),
+                "word_count": row.get("word_count"),
+                "content_preview": row.get("content_preview"),
+                "embedding_backend": row.get("embedding_backend"),
+                "embedding_model": row.get("embedding_model"),
+                "inserted_at": row.get("inserted_at").isoformat() if row.get("inserted_at") else None,
+            }
             output.append({
-                "chunk_id": row["chunk_id"],
-                "content": row["content"],
-                "source_url": row.get("source_url", ""),
-                "metadata": metadata or {},
-                "distance": float(row.get("cosine_distance", row.get("distance", 0))),
-                "similarity": float(row.get("similarity", 0)),
+                "chunk_id": row.get("chunk_id"),
+                "content": row.get("content"),
+                "source_url": row.get("source_url") or "",
+                "metadata": metadata,
+                "distance": float(row.get("distance") or 0.0),
+                "similarity": float(row.get("similarity") or 0.0),
             })
 
         return output
@@ -336,12 +381,24 @@ def keyword_search(
 
     where_clause = " OR ".join(conditions)
 
+    # Select specific columns instead of 'metadata'
     query = f"""
     SELECT
         chunk_id,
         content,
         source_url,
-        metadata
+        source_type,
+        section_path,
+        headers,
+        page_number,
+        title,
+        mime_type,
+        char_count,
+        word_count,
+        content_preview,
+        embedding_backend,
+        embedding_model,
+        inserted_at
     FROM `{full_table}`
     WHERE {where_clause}
     LIMIT @limit
@@ -370,19 +427,29 @@ def keyword_search(
         # Convert to expected format
         output = []
         for row in results:
-            metadata = row["metadata"]
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except:
-                    metadata = {}
+            # Reconstruct metadata
+            metadata = {
+                "source_url": row.get("source_url"),
+                "source_type": row.get("source_type"),
+                "section_path": row.get("section_path"),
+                "headers": row.get("headers"),
+                "page_number": row.get("page_number"),
+                "title": row.get("title"),
+                "mime_type": row.get("mime_type"),
+                "char_count": row.get("char_count"),
+                "word_count": row.get("word_count"),
+                "content_preview": row.get("content_preview"),
+                "embedding_backend": row.get("embedding_backend"),
+                "embedding_model": row.get("embedding_model"),
+                "inserted_at": row.get("inserted_at").isoformat() if row.get("inserted_at") else None,
+            }
 
             output.append({
                 "chunk_id": row["chunk_id"],
                 "content": row["content"],
                 "source_url": row.get("source_url", ""),
-                "metadata": metadata or {},
-                "distance": 0.0,  # Keyword matches have no meaningful distance; set to 0 for consistency
+                "metadata": metadata,
+                "distance": 0.0,
             })
 
         return output
@@ -423,12 +490,24 @@ def fetch_chunks_by_ids(
     tbl = table or get_bq_table()
     full_table = f"{proj}.{ds}.{tbl}"
 
+    # Select specific columns
     query = f"""
     SELECT
         chunk_id,
         content,
         source_url,
-        metadata
+        source_type,
+        section_path,
+        headers,
+        page_number,
+        title,
+        mime_type,
+        char_count,
+        word_count,
+        content_preview,
+        embedding_backend,
+        embedding_model,
+        inserted_at
     FROM `{full_table}`
     WHERE chunk_id IN UNNEST(@chunk_ids)
     """
@@ -445,18 +524,28 @@ def fetch_chunks_by_ids(
 
         output = []
         for row in results:
-            metadata = row["metadata"]
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except:
-                    metadata = {}
+            # Reconstruct metadata
+            metadata = {
+                "source_url": row.get("source_url"),
+                "source_type": row.get("source_type"),
+                "section_path": row.get("section_path"),
+                "headers": row.get("headers"),
+                "page_number": row.get("page_number"),
+                "title": row.get("title"),
+                "mime_type": row.get("mime_type"),
+                "char_count": row.get("char_count"),
+                "word_count": row.get("word_count"),
+                "content_preview": row.get("content_preview"),
+                "embedding_backend": row.get("embedding_backend"),
+                "embedding_model": row.get("embedding_model"),
+                "inserted_at": row.get("inserted_at").isoformat() if row.get("inserted_at") else None,
+            }
 
             output.append({
                 "chunk_id": row["chunk_id"],
                 "content": row["content"],
                 "source_url": row.get("source_url", ""),
-                "metadata": metadata or {},
+                "metadata": metadata,
             })
 
         return output

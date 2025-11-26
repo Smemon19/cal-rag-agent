@@ -1,4 +1,4 @@
-"""Utility functions for text processing and ChromaDB operations."""
+"""Utility functions for text processing and BigQuery operations."""
 
 import os
 import json
@@ -9,7 +9,6 @@ import psutil
 from typing import List, Dict, Any, Optional, Iterable, Set, Tuple
 from collections import OrderedDict
 
-import chromadb
 from more_itertools import batched
 import re
 import hashlib
@@ -22,8 +21,6 @@ _embedding_factory_logged: bool = False
 _DEFAULT_OVERLAP_CHARS: int = 150
 _EMBEDDING_FUNCTION_CACHE: Dict[Tuple[str, str], Any] = {}
 _EMBEDDING_WRAPPER_CACHE: Dict[Tuple[str, str], Any] = {}
-_CHROMA_CLIENT_CACHE: Dict[str, chromadb.PersistentClient] = {}
-_COLLECTION_CACHE: Dict[Tuple[int, str], Any] = {}
 _LAST_VECTOR_STORE_STATUS: Dict[str, Any] = {}
 _PROCESS_START_TS: float = time.time()
 _QUERY_COUNT: int = 0
@@ -68,52 +65,10 @@ def get_env_file_path() -> str:
     return str(Path(get_appdata_base_dir()) / ".env")
 
 
-def get_default_chroma_dir() -> str:
-    """Return the default path for Chroma persistence.
-
-    Resolution order:
-    1) Environment variable CHROMA_DIR (expanded, if set and non-empty)
-    2) Repository-local 'chroma_db' directory (if exists and non-empty)
-    3) Appdata directory fallback: ~/.calrag/chroma (or %LOCALAPPDATA%\\CalRAG\\chroma on Windows)
-    """
-    # 1) Explicit override via environment
-    try:
-        env_dir = os.getenv("CHROMA_DIR", "")
-        if env_dir and str(env_dir).strip() != "":
-            return str(Path(env_dir).expanduser())
-    except Exception:
-        pass
-
-    # 2) Repository-local directory next to this file
-    try:
-        repo_root = Path(__file__).resolve().parent
-        repo_chroma = repo_root / "chroma_db"
-        if repo_chroma.exists():
-            # Prefer repo path if it contains any files (i.e., a populated DB)
-            has_any = False
-            try:
-                next(repo_chroma.iterdir())
-                has_any = True
-            except StopIteration:
-                has_any = False
-            except Exception:
-                # If listing fails, be conservative and do not choose repo path
-                has_any = False
-            if has_any:
-                return str(repo_chroma)
-    except Exception:
-        pass
-
-    # 3) Fallback to appdata location
-    return str(Path(get_appdata_base_dir()) / "chroma")
-
-
 def ensure_appdata_scaffold() -> None:
     """Ensure base appdata directories exist and a template .env is present on first run."""
     base_dir = Path(get_appdata_base_dir())
-    chroma_dir = Path(get_default_chroma_dir())
     base_dir.mkdir(parents=True, exist_ok=True)
-    chroma_dir.mkdir(parents=True, exist_ok=True)
 
     env_path = Path(get_env_file_path())
     if not env_path.exists():
@@ -166,22 +121,72 @@ def is_file_url(url: str) -> bool:
     return s.startswith("file://")
 
 def resolve_embedding_backend_and_model() -> tuple[str, str]:
-    """Resolve embedding backend and model from environment with safe defaults.
+    """Resolve embedding backend/model with BigQuery-aware auto detection.
 
-    - EMBEDDING_BACKEND: "sentence" (default) or "openai"; invalid values fall back to "sentence" with a warning
-    - SENTENCE_MODEL: default "all-MiniLM-L6-v2"
-    - OPENAI_EMBED_MODEL: default "text-embedding-3-large"
+    Preference order:
+    1. Explicit env overrides (EMBEDDING_BACKEND / model variables)
+    2. BigQuery table metadata (embedding_backend / embedding_model)
+    3. Local defaults (sentence-transformers)
+
+    When metadata conflicts with env overrides for BigQuery-backed retrieval, the
+    metadata wins to avoid dimension mismatches between the LLM embeddings and the
+    stored vectors.
     """
-    backend_raw = os.getenv("EMBEDDING_BACKEND", "sentence")
-    backend = (backend_raw or "").strip().lower() or "sentence"
+    backend_raw = os.getenv("EMBEDDING_BACKEND", "auto")
+    forced_backend = (backend_raw or "").strip().lower()
+
+    vector_backend = (os.getenv("VECTOR_BACKEND", "bigquery") or "").strip().lower()
+    detected_backend: Optional[str] = None
+    detected_model: Optional[str] = None
+    if vector_backend == "bigquery":
+        try:
+            from utils_bigquery import get_table_embedding_config  # local import to avoid heavy dependency at import time
+
+            detected_backend, detected_model = get_table_embedding_config()
+        except Exception as e:  # pragma: no cover - diagnostics already printed downstream
+            try:
+                print(json.dumps({
+                    "where": "embeddings",
+                    "action": "detect_backend_error",
+                    "error": str(e),
+                }))
+            except Exception:
+                pass
+
+    backend: Optional[str]
+    backend = None
+    if not forced_backend or forced_backend == "auto":
+        backend = detected_backend
+    else:
+        backend = forced_backend
+
     if backend not in {"sentence", "openai"}:
-        print(f"[embeddings] Warning: Unknown EMBEDDING_BACKEND='{backend_raw}'. Falling back to 'sentence'.")
+        if backend is not None:
+            print(f"[embeddings] Warning: Unknown EMBEDDING_BACKEND='{backend_raw}'. Falling back to 'sentence'.")
         backend = "sentence"
 
+    # If BigQuery metadata indicates a different backend than the env override, prefer metadata.
+    if vector_backend == "bigquery" and detected_backend and backend != detected_backend:
+        print(json.dumps({
+            "where": "embeddings",
+            "action": "override_backend_conflict",
+            "env_backend": forced_backend or "auto",
+            "table_backend": detected_backend,
+        }))
+        backend = detected_backend
+
     if backend == "openai":
-        model = (os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-large") or "").strip() or "text-embedding-3-large"
+        model = (os.getenv("OPENAI_EMBED_MODEL") or "").strip()
+        if not model:
+            model = (detected_model or "text-embedding-3-large").strip()
+        if not model:
+            model = "text-embedding-3-large"
     else:
-        model = (os.getenv("SENTENCE_MODEL", "all-MiniLM-L6-v2") or "").strip() or "all-MiniLM-L6-v2"
+        model = (os.getenv("SENTENCE_MODEL") or "").strip()
+        if not model:
+            model = (detected_model or "all-MiniLM-L6-v2").strip()
+        if not model:
+            model = "all-MiniLM-L6-v2"
 
     return backend, model
 
@@ -323,7 +328,7 @@ def create_embedding_function():
             raise RuntimeError(
                 "OPENAI_API_KEY is required when EMBEDDING_BACKEND=openai. Set it in your environment or .env."
             )
-        fn = _embedding_functions.OpenAIEmbeddingFunction(api_key=api_key, model_name=model)
+        fn = _OpenAIEmbeddingFunction(api_key=api_key, model=model)
         if embed_cache_size > 0:
             fn = _wrap_embedding_with_lru_cache(fn, backend, model, embed_cache_size)
         _EMBEDDING_FUNCTION_CACHE[cache_key] = fn
@@ -514,6 +519,33 @@ def _wrap_embedding_with_lru_cache(base_fn: Any, backend: str, model: str, capac
     return wrapper
 
 
+class _OpenAIEmbeddingFunction:
+    """Lightweight embedding callable compatible with OpenAI Python >=1.x."""
+
+    def __init__(self, api_key: str, model: str):
+        from openai import OpenAI
+
+        client_kwargs = {"api_key": api_key}
+        project = os.getenv("OPENAI_PROJECT") or os.getenv("OPENAI_DEFAULT_PROJECT")
+        if project:
+            client_kwargs["project"] = project
+        organization = os.getenv("OPENAI_ORG") or os.getenv("OPENAI_ORGANIZATION")
+        if organization:
+            client_kwargs["organization"] = organization
+        self._client = OpenAI(**client_kwargs)
+        self._model = model
+
+    def name(self) -> str:
+        return f"openai::{self._model}"
+
+    def __call__(self, input: List[str]) -> List[List[float]]:
+        if not input:
+            return []
+
+        response = self._client.embeddings.create(model=self._model, input=input)
+        return [record.embedding for record in response.data]
+
+
 def normalize_source_url(raw: str) -> str:
     """Normalize a source URL or filesystem path deterministically.
 
@@ -560,7 +592,7 @@ def build_section_path(markdown_chunk: str) -> str:
         level = len(hashes)
         if 1 <= level <= 3 and level not in levels:
             levels[level] = text.strip()
-    parts = [levels.get(1, ""), levels.get(2, ""), levels.get(3, "")]
+        parts = [levels.get(1, ""), levels.get(2, ""), levels.get(3, "")]
     parts = [p for p in parts if p]
     return " > ".join(parts)
 
@@ -617,7 +649,7 @@ def make_chunk_metadata(
     return meta
 
 def get_default_collection_name() -> str:
-    """Return the default ChromaDB collection name.
+    """Return the default collection name.
 
     Resolution order for default (no CLI override):
     - Use the environment variable `RAG_COLLECTION_NAME` if it is set to a non-empty, non-whitespace value
@@ -638,235 +670,6 @@ def resolve_collection_name(cli_value: Optional[str] = None) -> str:
     if cli_value is not None and cli_value.strip() != "":
         return cli_value
     return get_default_collection_name()
-
-
-def get_chroma_client(persist_directory: str) -> chromadb.PersistentClient:
-    """Get a ChromaDB client with the specified persistence directory.
-    
-    Args:
-        persist_directory: Directory where ChromaDB will store its data
-        
-    Returns:
-        A ChromaDB PersistentClient
-    """
-    # If caller passed a falsey value, resolve default under appdata
-    final_dir = persist_directory or get_default_chroma_dir()
-    # Create the directory if it doesn't exist
-    os.makedirs(final_dir, exist_ok=True)
-
-    # Reuse client per directory
-    if final_dir in _CHROMA_CLIENT_CACHE:
-        status = {
-            "where": "vector_store",
-            "action": "init_or_reuse",
-            "target": "client",
-            "persist_directory": final_dir,
-            "reused": True,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-        _LAST_VECTOR_STORE_STATUS = status
-        print(json.dumps(status))
-        return _CHROMA_CLIENT_CACHE[final_dir]
-
-    client = chromadb.PersistentClient(final_dir)
-    _CHROMA_CLIENT_CACHE[final_dir] = client
-    status = {
-        "where": "vector_store",
-        "action": "init_or_reuse",
-        "target": "client",
-        "persist_directory": final_dir,
-        "reused": False,
-        "ts": datetime.now(timezone.utc).isoformat(),
-    }
-    _LAST_VECTOR_STORE_STATUS = status
-    print(json.dumps(status))
-    return client
-
-
-def get_or_create_collection(
-    client: chromadb.PersistentClient,
-    collection_name: Optional[str] = None,
-    embedding_model_name: str = "all-MiniLM-L6-v2",
-    distance_function: str = "cosine",
-) -> chromadb.Collection:
-    """Get an existing collection or create a new one if it doesn't exist.
-    
-    Args:
-        client: ChromaDB client
-        collection_name: Name of the collection. If None or blank, resolves via `get_default_collection_name()`.
-        embedding_model_name: Name of the embedding model to use
-        distance_function: Distance function to use for similarity search
-        
-    Returns:
-        A ChromaDB Collection
-    """
-    # Resolve name first
-    resolved_name = collection_name if (collection_name is not None and collection_name.strip() != "") else get_default_collection_name()
-
-    # Create embedding function via centralized factory
-    embedding_func = create_embedding_function()
-    backend, model = resolve_embedding_backend_and_model()
-    
-    # Cache and reuse collection object per (client id, name)
-    cache_key = (id(client), resolved_name)
-    if cache_key in _COLLECTION_CACHE:
-        col_cached = _COLLECTION_CACHE[cache_key]
-        status = {
-            "where": "vector_store",
-            "action": "init_or_reuse",
-            "target": "collection",
-            "collection_name": resolved_name,
-            "reused": True,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-        _LAST_VECTOR_STORE_STATUS = status
-        print(json.dumps(status))
-        return col_cached
-
-    # Try to get the collection, create it if it doesn't exist
-    try:
-        col = client.get_collection(
-            name=resolved_name,
-            embedding_function=embedding_func
-        )
-        _COLLECTION_CACHE[cache_key] = col
-        status = {
-            "where": "vector_store",
-            "action": "init_or_reuse",
-            "target": "collection",
-            "collection_name": resolved_name,
-            "reused": True,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-        _LAST_VECTOR_STORE_STATUS = status
-        print(json.dumps(status))
-        # Warn if potential mixed embeddings (compare stored metadata when available)
-        meta = getattr(col, "metadata", {}) or {}
-        stored_backend = meta.get("embedding_backend")
-        stored_model = meta.get("embedding_model")
-        if stored_backend and (stored_backend != backend or (stored_model and stored_model != model)):
-            print(
-                f"[embeddings] Warning: Existing collection '{resolved_name}' was created with backend='{stored_backend}', model='{stored_model}'. "
-                f"Current session uses backend='{backend}', model='{model}'. Mixing embeddings in one collection can degrade retrieval. "
-                f"Consider using a different collection name."
-            )
-        else:
-            # If metadata missing, still advise cautiously
-            print(
-                f"[embeddings] Opened existing collection '{resolved_name}'. If it was created with a different embedding backend, retrieval may degrade."
-            )
-        return col
-    except Exception:
-        col = client.create_collection(
-            name=resolved_name,
-            embedding_function=embedding_func,
-            metadata={
-                "hnsw:space": distance_function,
-                "embedding_backend": backend,
-                "embedding_model": model,
-            }
-        )
-        _COLLECTION_CACHE[cache_key] = col
-        status = {
-            "where": "vector_store",
-            "action": "init_or_reuse",
-            "target": "collection",
-            "collection_name": resolved_name,
-            "reused": False,
-            "ts": datetime.now(timezone.utc).isoformat(),
-        }
-        _LAST_VECTOR_STORE_STATUS = status
-        print(json.dumps(status))
-        return col
-
-
-def add_documents_to_collection(
-    collection: chromadb.Collection,
-    ids: List[str],
-    documents: List[str],
-    metadatas: Optional[List[Dict[str, Any]]] = None,
-    batch_size: int = 100,
-) -> None:
-    """Add documents to a ChromaDB collection in batches.
-    
-    Args:
-        collection: ChromaDB collection
-        ids: List of document IDs
-        documents: List of document texts
-        metadatas: Optional list of metadata dictionaries for each document
-        batch_size: Size of batches for adding documents
-    """
-    # Create default metadata if none provided
-    if metadatas is None:
-        metadatas = [{}] * len(documents)
-    
-    # Create document indices
-    document_indices = list(range(len(documents)))
-    
-    # Add documents in batches
-    for batch in batched(document_indices, batch_size):
-        # Get the start and end indices for the current batch
-        start_idx = batch[0]
-        end_idx = batch[-1] + 1  # +1 because end_idx is exclusive
-        
-        # Add the batch to the collection
-        collection.add(
-            ids=ids[start_idx:end_idx],
-            documents=documents[start_idx:end_idx],
-            metadatas=metadatas[start_idx:end_idx],
-        )
-
-
-def get_existing_ids(collection: chromadb.Collection, candidate_ids: Iterable[str], batch_size: int = 500) -> Set[str]:
-    """Return the subset of candidate_ids that already exist in the collection.
-
-    Uses batched collection.get(ids=[...]) calls to avoid loading the entire collection.
-    """
-    existing: Set[str] = set()
-    batch: List[str] = []
-    for cid in candidate_ids:
-        batch.append(cid)
-        if len(batch) >= batch_size:
-            try:
-                res = collection.get(ids=batch, include=[])
-                existing.update(res.get("ids", []))
-            except Exception:
-                # Some providers may error on unknown ids; fallback to scanning
-                pass
-            batch = []
-    if batch:
-        try:
-            res = collection.get(ids=batch, include=[])
-            existing.update(res.get("ids", []))
-        except Exception:
-            pass
-    return existing
-
-
-def query_collection(
-    collection: chromadb.Collection,
-    query_text: str,
-    n_results: int = 5,
-    where: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
-    """Query a ChromaDB collection for similar documents.
-    
-    Args:
-        collection: ChromaDB collection
-        query_text: Text to search for
-        n_results: Number of results to return
-        where: Optional filter to apply to the query
-        
-    Returns:
-        Query results containing documents, metadatas, distances, and ids
-    """
-    # Query the collection
-    return collection.query(
-        query_texts=[query_text],
-        n_results=n_results,
-        where=where,
-        include=["documents", "metadatas", "distances"]
-    )
 
 
 def format_results_as_context(query_results: Dict[str, Any]) -> str:
@@ -897,92 +700,6 @@ def format_results_as_context(query_results: Dict[str, Any]) -> str:
         context += f"Content: {doc}\n\n"
     
     return context
-
-
-def keyword_search_collection(
-    collection: chromadb.Collection,
-    substrings: List[str],
-    max_results: int = 5,
-    batch_size: int = 200,
-) -> Dict[str, Any]:
-    """Search a collection by simple substring matching over documents.
-
-    This is a hybrid fallback for numeric/section queries (e.g., "TABLE 1507.9.6").
-
-    Args:
-        collection: The ChromaDB collection to search.
-        substrings: List of case-insensitive substrings to look for.
-        max_results: Maximum number of matches to return.
-        batch_size: Number of items to scan per batch.
-
-    Returns:
-        A dict similar to collection.query output shape with keys: documents, metadatas, ids.
-    """
-    normalized = [s.lower() for s in substrings if s]
-    total = collection.count()
-    # Prefilter limit: if the total exceeds a threshold, skip client-side scanning entirely
-    try:
-        prefilter_limit_raw = os.getenv("KEYWORD_PREFILTER_LIMIT", "5000")
-        prefilter_limit = max(0, int(str(prefilter_limit_raw).strip()))
-    except Exception:
-        prefilter_limit = 5000
-    if prefilter_limit > 0 and total > prefilter_limit:
-        print(json.dumps({
-            "where": "vector_store",
-            "action": "keyword_prefilter",
-            "prefilter_fallback": True,
-            "total_candidates": total,
-            "limit": prefilter_limit
-        }))
-        return {
-            "documents": [[]],
-            "metadatas": [[]],
-            "ids": [[]],
-            "prefilter_fallback": True,
-        }
-    # To prevent unbounded scans on large collections, cap the number of rows scanned.
-    # Configure via env KEYWORD_SCAN_LIMIT; default to 2000 documents.
-    try:
-        scan_limit_raw = os.getenv("KEYWORD_SCAN_LIMIT", "2000")
-        scan_limit = max(0, int(str(scan_limit_raw).strip()))
-    except Exception:
-        scan_limit = 2000
-    total_to_scan = min(total, scan_limit) if scan_limit > 0 else total
-    results_docs: List[str] = []
-    results_metas: List[Dict[str, Any]] = []
-    results_ids: List[str] = []
-
-    offset = 0
-    while offset < total_to_scan and len(results_docs) < max_results:
-        res = collection.get(include=["documents", "metadatas"], limit=min(batch_size, total_to_scan - offset), offset=offset)
-        docs = res.get("documents", [])
-        metas = res.get("metadatas", [])
-        ids = res.get("ids", [])
-        for doc, meta, id_ in zip(docs, metas, ids):
-            text = (doc or "").lower()
-            if any(sub in text for sub in normalized):
-                results_docs.append(doc)
-                results_metas.append(meta)
-                results_ids.append(id_)
-                if len(results_docs) >= max_results:
-                    break
-        offset += batch_size
-
-    out = {
-        "documents": [results_docs],
-        "metadatas": [results_metas],
-        "ids": [results_ids],
-    }
-    if total > total_to_scan:
-        # Informative log: scan capped
-        print(json.dumps({
-            "where": "vector_store",
-            "action": "keyword_scan",
-            "capped": True,
-            "scanned": total_to_scan,
-            "total": total
-        }))
-    return out
 
 
 # --------------- Health/diagnostics helpers ---------------
