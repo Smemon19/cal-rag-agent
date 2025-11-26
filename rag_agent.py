@@ -1,4 +1,4 @@
-"""Pydantic AI agent that leverages RAG with vector stores (ChromaDB or BigQuery)."""
+"""Pydantic AI agent that leverages RAG with BigQuery Vector Search."""
 
 import os
 import sys
@@ -97,7 +97,7 @@ class RAGDeps:
     vector_store: VectorStore
     embedding_model: str
     collection_name: str = "docs_ibc_v2"
-    vector_backend: str = "chroma"
+    vector_backend: str = "bigquery"
     header_contains: Optional[str] = None
     source_contains: Optional[str] = None
 
@@ -845,8 +845,8 @@ async def run_rag_agent(
 
     Args:
         question: The question to answer.
-        collection_name: Name of the collection to use (for Chroma backend).
-        db_directory: Directory where vector store data is stored (for Chroma backend).
+        collection_name: Name of the collection to use.
+        db_directory: Directory where vector store data is stored.
         embedding_model: Name of the embedding model to use.
         n_results: Number of results to return from the retrieval.
 
@@ -862,8 +862,7 @@ async def run_rag_agent(
     if backend_name == "bigquery":
         vector_store = get_vector_store(backend="bigquery")
     else:
-        # Fallback to BigQuery if unknown backend is resolved, or error out.
-        # Since we removed Chroma, we default to BigQuery.
+        # Default to BigQuery for all vector operations
         vector_store = get_vector_store(backend="bigquery")
 
     # Create dependencies
@@ -873,7 +872,7 @@ async def run_rag_agent(
     deps = RAGDeps(
         vector_store=vector_store,
         embedding_model=effective_model,
-        collection_name=resolved_collection if backend_name == "chroma" else "docs_ibc_v2",
+        collection_name="docs_ibc_v2",
         vector_backend=backend_name
     )
 
@@ -975,18 +974,18 @@ async def run_rag_agent(
 
 def main():
     """Main function to parse arguments and run the RAG agent."""
-    parser = argparse.ArgumentParser(description="Run a Pydantic AI agent with RAG using ChromaDB")
+    parser = argparse.ArgumentParser(description="Run a Pydantic AI agent with RAG using BigQuery Vector Search")
     parser.add_argument("--question", help="The question to answer about Pydantic AI")
-    parser.add_argument("--collection", default=None, help="Name of the ChromaDB collection (overrides env)")
-    parser.add_argument("--db-dir", default="", help="Directory where ChromaDB data is stored (default: AppData)")
+    parser.add_argument("--collection", default=None, help="Name of the collection (overrides env)")
+    parser.add_argument("--db-dir", default="", help="Directory where vector store data is stored (default: AppData)")
     parser.add_argument("--embedding-model", default=None, help="Name of the embedding model to use (auto if omitted)")
     parser.add_argument("--n-results", type=int, default=5, help="Number of results to return from the retrieval")
-    
+
     args = parser.parse_args()
-    
+
     # Log resolved collection once for visibility
     resolved_name = resolve_collection_name(args.collection)
-    print(f"[agent] Using ChromaDB collection: '{resolved_name}'")
+    print(f"[agent] Using collection: '{resolved_name}'")
 
     # Run the agent
     response = asyncio.run(run_rag_agent(

@@ -279,7 +279,7 @@ def compute_embedding_fingerprint() -> Dict[str, Any]:
 
 
 def create_embedding_function():
-    """Create and return a Chroma embedding function based on resolved backend/model.
+    """Create and return an embedding function based on resolved backend/model.
 
     For 'openai', requires OPENAI_API_KEY to be set and non-empty.
     Logs the chosen backend/model once per process startup.
@@ -310,10 +310,6 @@ def create_embedding_function():
         # Best effort; if this fails, downstream may still attempt defaults
         pass
 
-    # Lazy-import to avoid importing heavy deps (e.g., torch via sentence-transformers)
-    # during Streamlit startup/module scanning. This prevents watcher crashes.
-    from chromadb.utils import embedding_functions as _embedding_functions
-
     # Determine optional bounded cache size for embeddings
     # Set EMBED_CACHE_SIZE=0 to disable caching
     try:
@@ -334,7 +330,7 @@ def create_embedding_function():
         _EMBEDDING_FUNCTION_CACHE[cache_key] = fn
         return fn
 
-    # Default: sentence-transformers
+    # Default: sentence-transformers (direct implementation without ChromaDB dependency)
     # Proactively prewarm the model to avoid partial downloads in read-only/home-restricted envs
     try:
         try:
@@ -357,7 +353,7 @@ def create_embedding_function():
         except Exception:
             pass
 
-    fn = _embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model)
+    fn = _SentenceTransformerEmbeddingFunction(model_name=model)
     if embed_cache_size > 0:
         fn = _wrap_embedding_with_lru_cache(fn, backend, model, embed_cache_size)
     _EMBEDDING_FUNCTION_CACHE[cache_key] = fn
@@ -365,7 +361,7 @@ def create_embedding_function():
 
 
 def _wrap_embedding_with_lru_cache(base_fn: Any, backend: str, model: str, capacity: int) -> Any:
-    """Wrap a chromadb embedding function with a bounded LRU cache.
+    """Wrap an embedding function with a bounded LRU cache.
 
     The underlying embedding function is expected to be callable with a list[str]
     and return a list[list[float]]. We cache per-text embeddings keyed by a
@@ -385,7 +381,7 @@ def _wrap_embedding_with_lru_cache(base_fn: Any, backend: str, model: str, capac
             self._misses: int = 0
 
         def name(self) -> str:
-            # Expose a stable name for Chroma's embedding function interface
+            # Expose a stable name for the embedding function interface
             try:
                 inner_name = getattr(self._inner, "name", None)
                 if callable(inner_name):
@@ -544,6 +540,42 @@ class _OpenAIEmbeddingFunction:
 
         response = self._client.embeddings.create(model=self._model, input=input)
         return [record.embedding for record in response.data]
+
+
+class _SentenceTransformerEmbeddingFunction:
+    """Lightweight embedding callable using sentence-transformers directly."""
+
+    def __init__(self, model_name: str):
+        from sentence_transformers import SentenceTransformer
+        # Lazy-load model to avoid heavy imports at module level
+        self._model_name = model_name
+        self._model = None
+
+    def name(self) -> str:
+        return f"sentence-transformers::{self._model_name}"
+
+    def _get_model(self):
+        """Lazy-load the model on first use."""
+        if self._model is None:
+            from sentence_transformers import SentenceTransformer
+            try:
+                hf_root = os.getenv("SENTENCE_TRANSFORMERS_HOME") or os.getenv("TRANSFORMERS_CACHE")
+                self._model = SentenceTransformer(
+                    self._model_name,
+                    cache_folder=hf_root if hf_root else None
+                )
+            except Exception:
+                self._model = SentenceTransformer(self._model_name)
+        return self._model
+
+    def __call__(self, input: List[str]) -> List[List[float]]:
+        if not input:
+            return []
+
+        model = self._get_model()
+        # Convert to list of lists (sentence-transformers returns numpy arrays)
+        embeddings = model.encode(input, convert_to_numpy=True, show_progress_bar=False)
+        return embeddings.tolist()
 
 
 def normalize_source_url(raw: str) -> str:
