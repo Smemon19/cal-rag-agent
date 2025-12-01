@@ -12,6 +12,7 @@ tenacity==8.3.0
 pydantic-ai==0.0.24
 psutil
 more-itertools
+pint
 pandas
 PyMuPDF
 pytesseract

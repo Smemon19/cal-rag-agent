@@ -58,20 +58,27 @@ sanitize_and_validate_openai_key()
 _fingerprint: dict = {}
 
 # In container runtimes, fail fast if key invalid and prewarm embeddings before readiness
+print("[startup] container mode detected?", bool(os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")))
 if (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBASE_APP_HOSTING")):
     kd = get_key_diagnostics()
+    print(f"[startup] key diagnostics: {kd}")
     if not kd.get("valid"):
+        print("[startup] OPENAI_API_KEY invalid -> exiting early")
         raise SystemExit(1)
     try:
         from utils import create_embedding_function
+        print("[startup] warming embeddings...")
         fn = create_embedding_function()
         _ = fn(["warmup"])  # ensure model fully loads
+        print("[startup] embedding warmup complete")
     except Exception:
+        print("[startup] embedding warmup failed, exiting")
         raise SystemExit(1)
 
 async def get_agent_deps(header_contains: str | None, source_contains: str | None):
     """Create agent dependencies with configured vector store."""
     # Get vector store backend information
+    print("[deps] resolving vector backend")
     backend_name, backend_config = resolve_vector_backend()
 
     # Log backend information
@@ -88,7 +95,8 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
 
     collection_name = "docs_ibc_v2"  # BigQuery uses table name instead
 
-    return RAGDeps(
+    print("[deps] instantiating vector store")
+    deps = RAGDeps(
         vector_store=_get_cached_vector_store(),
         embedding_model=emb_model,
         collection_name=collection_name,
@@ -96,6 +104,8 @@ async def get_agent_deps(header_contains: str | None, source_contains: str | Non
         header_contains=(header_contains or None),
         source_contains=(source_contains or None),
     )
+    print("[deps] vector store ready")
+    return deps
 
 
 def _vector_store_diag() -> dict:
@@ -250,6 +260,7 @@ async def run_agent_with_streaming(user_input):
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 async def main():
+    print("[main] entered")
     st.title("CAL AI Agent")
 
     # Lightweight health probe: return quickly when ?healthz=1
@@ -264,6 +275,7 @@ async def main():
 
     # Gate readiness: fail fast in UI if key invalid; warmup embeddings
     key_diag = get_key_diagnostics()
+    print(f"[main] key diagnostics: {key_diag}")
     if not key_diag.get("valid"):
         st.sidebar.error("OPENAI_API_KEY invalid or missing. See Diagnostics.")
         with st.sidebar.expander("Diagnostics", expanded=True):
@@ -286,8 +298,10 @@ async def main():
     try:
         # Touch embedding function to ensure model is loaded
         from utils import create_embedding_function
+        print("[main] creating embedding function")
         fn = create_embedding_function()
         _ = fn(["warmup"])
+        print("[main] embedding warmup finished")
     except Exception as e:
         # Log warning but don't stop - embeddings will be loaded on first query
         st.sidebar.warning("⚠️ Embedding warmup skipped. Models will load on first query.")
@@ -311,10 +325,12 @@ async def main():
     st.sidebar.text_input("Source contains", key="source_contains", placeholder="e.g., pydantic.dev")
 
     # Recreate deps each render so filters are applied
+    print("[main] building agent deps")
     st.session_state.agent_deps = await get_agent_deps(
         st.session_state.header_contains.strip() or None,
         st.session_state.source_contains.strip() or None,
     )
+    print("[main] agent deps ready")
 
     # Show active collection and filters summary
     st.sidebar.markdown(f"**Collection:** {st.session_state.agent_deps.collection_name}")
