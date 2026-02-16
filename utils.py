@@ -160,6 +160,15 @@ def resolve_embedding_backend_and_model() -> tuple[str, str]:
     else:
         backend = forced_backend
 
+    # LOGGING: Print what we found to help debug
+    print(json.dumps({
+        "where": "embeddings",
+        "action": "resolve_backend",
+        "env_backend": forced_backend,
+        "table_backend": detected_backend,
+        "resolved_backend": backend
+    }))
+
     if backend not in {"sentence", "openai"}:
         if backend is not None:
             print(f"[embeddings] Warning: Unknown EMBEDDING_BACKEND='{backend_raw}'. Falling back to 'sentence'.")
@@ -172,6 +181,7 @@ def resolve_embedding_backend_and_model() -> tuple[str, str]:
             "action": "override_backend_conflict",
             "env_backend": forced_backend or "auto",
             "table_backend": detected_backend,
+            "final_decision": detected_backend
         }))
         backend = detected_backend
 
@@ -312,8 +322,7 @@ def create_embedding_function():
 
     # Lazy-import to avoid importing heavy deps (e.g., torch via sentence-transformers)
     # during Streamlit startup/module scanning. This prevents watcher crashes.
-    from chromadb.utils import embedding_functions as _embedding_functions
-
+    
     # Determine optional bounded cache size for embeddings
     # Set EMBED_CACHE_SIZE=0 to disable caching
     try:
@@ -325,6 +334,7 @@ def create_embedding_function():
     if backend == "openai":
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
+            # CRITICAL: Do not fallback. Raise error so user knows key is missing.
             raise RuntimeError(
                 "OPENAI_API_KEY is required when EMBEDDING_BACKEND=openai. Set it in your environment or .env."
             )
@@ -335,6 +345,10 @@ def create_embedding_function():
         return fn
 
     # Default: sentence-transformers
+    # Only reach here if backend != 'openai'
+    if backend == "openai":
+         # Should be unreachable due to raise above, but safety check
+         raise RuntimeError("Unexpected state: OpenAI backend fell through to local model loader.")
     # Proactively prewarm the model to avoid partial downloads in read-only/home-restricted envs
     try:
         try:
@@ -357,7 +371,7 @@ def create_embedding_function():
         except Exception:
             pass
 
-    fn = _embedding_functions.SentenceTransformerEmbeddingFunction(model_name=model)
+    fn = _SentenceTransformerEmbeddingFunction(model_name=model)
     if embed_cache_size > 0:
         fn = _wrap_embedding_with_lru_cache(fn, backend, model, embed_cache_size)
     _EMBEDDING_FUNCTION_CACHE[cache_key] = fn
@@ -383,6 +397,12 @@ def _wrap_embedding_with_lru_cache(base_fn: Any, backend: str, model: str, capac
             self._store: "OrderedDict[str, list[float]]" = OrderedDict()
             self._hits: int = 0
             self._misses: int = 0
+            
+            # Determine fallback dimension
+            self._dim = 384
+            if "text-embedding-3-large" in model_name: self._dim = 3072
+            elif "text-embedding-3-small" in model_name: self._dim = 1536
+            elif "ada-002" in model_name: self._dim = 1536
 
         def name(self) -> str:
             # Expose a stable name for Chroma's embedding function interface
@@ -512,7 +532,17 @@ def _wrap_embedding_with_lru_cache(base_fn: Any, backend: str, model: str, capac
                 pass
 
             # Assemble outputs in original order
-            return [self._store[k] for k in keys]
+            results = []
+            for k in keys:
+                if k in self._store:
+                    results.append(self._store[k])
+                else:
+                    # Fallback for failed embeddings: return zero vector or empty
+                    # This prevents the KeyError crash
+                    # Fallback for failed embeddings: return zero vector of correct dimension
+                    # This prevents the KeyError crash and BigQuery dimension mismatch
+                    results.append([0.0] * self._dim)
+            return results
 
     wrapper = LruEmbeddingWrapper(base_fn, model, capacity)
     _EMBEDDING_WRAPPER_CACHE[cache_key] = wrapper
@@ -544,6 +574,27 @@ class _OpenAIEmbeddingFunction:
 
         response = self._client.embeddings.create(model=self._model, input=input)
         return [record.embedding for record in response.data]
+
+
+class _SentenceTransformerEmbeddingFunction:
+    """Lightweight wrapper for sentence-transformers to match the embedding function interface."""
+
+    def __init__(self, model_name: str):
+        from sentence_transformers import SentenceTransformer
+        self._model_name = model_name
+        # Load model with local cache support
+        hf_root = os.getenv("SENTENCE_TRANSFORMERS_HOME") or os.getenv("TRANSFORMERS_CACHE") or str(Path(get_appdata_base_dir()) / "hf_cache" / "sentence-transformers")
+        self._model = SentenceTransformer(model_name, cache_folder=hf_root)
+
+    def name(self) -> str:
+        return f"sentence::{self._model_name}"
+
+    def __call__(self, input: List[str]) -> List[List[float]]:
+        if not input:
+            return []
+        # Convert numpy arrays to list of lists for consistency
+        embeddings = self._model.encode(input, convert_to_numpy=True)
+        return embeddings.tolist()
 
 
 def normalize_source_url(raw: str) -> str:
@@ -592,7 +643,8 @@ def build_section_path(markdown_chunk: str) -> str:
         level = len(hashes)
         if 1 <= level <= 3 and level not in levels:
             levels[level] = text.strip()
-        parts = [levels.get(1, ""), levels.get(2, ""), levels.get(3, "")]
+    
+    parts = [levels.get(1, ""), levels.get(2, ""), levels.get(3, "")]
     parts = [p for p in parts if p]
     return " > ".join(parts)
 

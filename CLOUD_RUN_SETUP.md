@@ -81,7 +81,7 @@ Security and keys:
 File system and state:
 
 - Caches are in-process; each instance maintains its own. State resets on restart/scale events.
-- Do not rely on local disk persistence across restarts. Chroma runs in Persistent mode against your chosen directory but on Cloud Run only /tmp is writable.
+- Do not rely on local disk persistence across restarts. On Cloud Run only /tmp is writable.
 
 ### Troubleshooting
 

@@ -76,12 +76,10 @@ if ! gcloud artifacts repositories describe "$ART_REPO" --location="$REGION" >/d
   gcloud artifacts repositories create "$ART_REPO" --repository-format=docker --location="$REGION" --quiet
 fi
 
-# -------- Preflight: ChromaDB presence --------
+# -------- Preflight: ChromaDB presence (Removed for BigQuery) --------
+# (Skipped check)
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-if [[ ! -d "$ROOT_DIR/chroma_db" || -z $(ls -A "$ROOT_DIR/chroma_db" 2>/dev/null) ]]; then
-  echo "[fail] chroma_db/ missing or empty. Ensure the vector store is present before deploy." >&2
-  exit 3
-fi
 
 # -------- Build & Tag --------
 TS=$(date +%Y%m%d-%H%M%S)
@@ -101,7 +99,7 @@ COMMON_ARGS=(
   --timeout="$TIMEOUT"
   --max-instances="$MAX_INSTANCES"
   --min-instances="$MIN_INSTANCES"
-  --set-env-vars=CHROMA_DIR=/tmp/.calrag/chroma,FIREBASE_APP_HOSTING=true
+  --set-env-vars=FIREBASE_APP_HOSTING=true
   --set-secrets=OPENAI_API_KEY=openai-api-key:latest
 )
 if [[ -n "$SERVICE_ACCOUNT" ]]; then

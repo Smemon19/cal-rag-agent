@@ -33,9 +33,16 @@ def get_bq_table() -> str:
     return os.getenv("BQ_TABLE", "documents")
 
 
-def get_full_table_id() -> str:
+def get_full_table_id(
+    project: Optional[str] = None,
+    dataset: Optional[str] = None,
+    table: Optional[str] = None,
+) -> str:
     """Get fully qualified BigQuery table ID."""
-    return f"{get_bq_project()}.{get_bq_dataset()}.{get_bq_table()}"
+    p = project or get_bq_project()
+    d = dataset or get_bq_dataset()
+    t = table or get_bq_table()
+    return f"{p}.{d}.{t}"
 
 
 def get_table_embedding_config(
@@ -110,6 +117,13 @@ def get_bq_client(project: Optional[str] = None) -> Client:
 
     # Validate GOOGLE_APPLICATION_CREDENTIALS if set
     creds_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    
+    # Handle empty string from .env by treating it as unset
+    if creds_path is not None and not creds_path.strip():
+        if "GOOGLE_APPLICATION_CREDENTIALS" in os.environ:
+            del os.environ["GOOGLE_APPLICATION_CREDENTIALS"]
+        creds_path = None
+
     if creds_path:
         from pathlib import Path
         creds_file = Path(creds_path)
@@ -712,4 +726,31 @@ def get_vector_index_info(
 
 def get_last_status() -> Dict[str, Any]:
     """Get the last BigQuery operation status for diagnostics."""
-    return _BQ_LAST_STATUS.copy() if _BQ_LAST_STATUS else {}
+    return _BQ_LAST_STATUS
+
+
+def insert_rows_json(
+    rows: List[Dict[str, Any]],
+    project: Optional[str] = None,
+    dataset: Optional[str] = None,
+    table: Optional[str] = None,
+) -> None:
+    """Insert rows into BigQuery table.
+
+    Args:
+        rows: List of dictionaries representing rows to insert.
+        project: Optional project override.
+        dataset: Optional dataset override.
+        table: Optional table override.
+    """
+    client = get_bq_client(project)
+    full_table_id = get_full_table_id(project, dataset, table)
+
+    errors = client.insert_rows_json(full_table_id, rows)
+    if errors:
+        raise RuntimeError(f"BigQuery insertion errors: {errors}")
+    
+    print(f"[bigquery] Successfully inserted {len(rows)} rows into {full_table_id}")
+    if _BQ_LAST_STATUS:
+        # Update status timestamp if we have a status object
+        _BQ_LAST_STATUS["ts"] = datetime.now(timezone.utc).isoformat()

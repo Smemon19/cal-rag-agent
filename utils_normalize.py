@@ -44,10 +44,7 @@ def _with_thousands(n: int) -> str:
     return f"{n:,}"
 
 
-def _float_fmt(x: float) -> str:
-    # Trim trailing zeros but keep one decimal if present in examples like 26.7
-    s = f"{x:.1f}"
-    return s
+
 
 
 def _detect_numbers(text: str) -> List[str]:
@@ -117,25 +114,6 @@ def expand_numeric_tokens(text: str) -> List[str]:
         # lb/kN literal attachments (non-converted)
         for u in ["lb", "pounds", "kN", "kilonewtons"]:
             variants.add(f"{num_raw} {u}")
-
-    # Conversions for explicit pairs present in text
-    for num_str, unit in pairs:
-        unit_l = unit.lower()
-        val = _parse_float(num_str)
-        if val != val:  # NaN
-            continue
-        if unit_l in {"lb", "pounds"}:
-            kn = val * 0.0044482216152605
-            kn_s = _float_fmt(kn)
-            variants.add(f"{kn_s} kN")
-            variants.add(f"{kn_s} kilonewtons")
-        elif unit_l in {"kn", "kn", "kilonewtons"}:  # normalize case
-            # kN -> lb: 1 kN ≈ 224.80894387 lb
-            lb = val * 224.80894387096
-            # Round to nearest whole number for readability
-            lb_int = int(round(lb))
-            variants.add(f"{lb_int} lb")
-            variants.add(f"{_with_thousands(lb_int)} pounds")
 
     return [v for v in variants if v]
 

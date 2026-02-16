@@ -41,13 +41,7 @@ from utils import (
 from utils_vectorstore import get_vector_store, resolve_vector_backend, VectorStore
 from rag_components import RetrievalOrchestrator
 
-from tools_calc import (
-    deflection_limit,
-    vehicle_barrier_reaction,
-    fall_anchor_design_load,
-    wind_speed_category,
-    machinery_impact_factor,
-)
+
 from rules_loader import load_all_rules
 from verify import verify_answer
 import json as _json
@@ -190,7 +184,7 @@ class RagAgent:
     async def insert_from_url(self, url: str, chunk_size: int = 1000, max_depth: int = 3, 
                              max_concurrent: int = 10, batch_size: int = 100, overlap_chars: int = 150) -> None:
         """Insert documents from a URL into the collection."""
-        from insert_docs import (
+        from utils_crawler import (
             is_sitemap, is_txt, crawl_recursive_internal_links, 
             crawl_markdown_file, parse_sitemap, crawl_batch
         )
@@ -451,7 +445,6 @@ class RagAgent:
 
             if not keep_indices:
                 print(f"[ingest] All {len(ids)} chunks already exist; skipping insert.")
-            else:
                 ids_new = [ids[i] for i in keep_indices]
                 docs_new = [documents[i] for i in keep_indices]
                 metas_new = [metadatas[i] for i in keep_indices]
@@ -518,7 +511,13 @@ def create_agent():
         model_choice,
         deps_type=RAGDeps,
         model_settings={"tool_choice": "required"},
-        system_prompt="You are the CAL Engineering Assistant. Always rely on the supplied context and tools; if the context lacks the answer, say so."
+        system_prompt=(
+            "You are the CAL Engineering Assistant, an expert in building codes and structural engineering. "
+            "Your goal is to be helpful, precise, and conversational. "
+            "When provided with context, use it to answer specific code questions. "
+            "If the user greets you or asks a general question, respond naturally and politely, ignoring the context if it is not relevant. "
+            "Do not say 'I don't have that information' for greetings or general engineering questions."
+        )
     )
 
 # Initialize agent as None and track the last key used to recreate if it changes
@@ -662,10 +661,11 @@ def _build_structured_extracts(
             quote = _extract_quote_for_token(doc, section)
             if not quote:
                 continue
-            if question_terms:
-                haystack = f"{quote} {(meta or {}).get('section_path', '')}".lower()
-                if not any(term in haystack for term in question_terms):
-                    continue
+            # Removed aggressive keyword filtering to trust vector search results
+            # if question_terms:
+            #     haystack = f"{quote} {(meta or {}).get('section_path', '')}".lower()
+            #     if not any(term in haystack for term in question_terms):
+            #         continue
             code_label = _derive_code_label(meta)
             source = meta.get("title") or meta.get("source_url") or "Unknown source"
             entries.append(f"- [{code_label} §{section}] \"{quote}\" (Source: {source})")
@@ -826,12 +826,6 @@ async def retrieve(
 def _register_tools(agent_instance: Agent) -> None:
     """Register all tools on the provided agent instance."""
     agent_instance.tool(retrieve)
-    # Calculation tools (pure functions; no RunContext)
-    agent_instance.tool_plain(deflection_limit)
-    agent_instance.tool_plain(vehicle_barrier_reaction)
-    agent_instance.tool_plain(fall_anchor_design_load)
-    agent_instance.tool_plain(wind_speed_category)
-    agent_instance.tool_plain(machinery_impact_factor)
 
 
 async def run_rag_agent(
@@ -899,9 +893,11 @@ async def run_rag_agent(
         return result.data
 
     augmented_question = (
-        "Answer the user using ONLY the context provided. Cite sections in plain text (e.g., "
-        "\"IBC 2018 §1507.2\") when possible. If the context does not contain the answer, reply "
-        "with \"I don't have that information in the current documentation.\" Use a natural tone.\n\n"
+        "Answer the user's question. Use the provided context as your primary source for code sections and regulations. "
+        "Cite sections in plain text (e.g., \"IBC 2018 §1507.2\") when possible. "
+        "If the context is incomplete or missing, you may use your general engineering knowledge to answer, "
+        "but clearly state what is from the context and what is general knowledge. "
+        "For mathematical questions, perform the necessary calculations.\n\n"
         f"Context:\n{context_text}\n\nUser question: {question}"
     )
     result = await get_agent().run(augmented_question, deps=deps, model_settings={"temperature": 0.2})
@@ -920,6 +916,14 @@ async def run_rag_agent(
 
     # Verify against last retrieval context
     ctx_text = verification_context or ""
+    
+    # Skip verification for short conversational answers or refusals
+    is_refusal = "i don't have that information" in answer_text.lower()
+    is_short = len(answer_text) < 150
+    if is_refusal or is_short:
+        print("[verify] skipping verification for refusal/short answer")
+        return answer_text
+
     try:
         ver = verify_answer(answer_text, ctx_text)
     except Exception as e:

@@ -63,17 +63,17 @@ if (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FIREBA
     kd = get_key_diagnostics()
     print(f"[startup] key diagnostics: {kd}")
     if not kd.get("valid"):
-        print("[startup] OPENAI_API_KEY invalid -> exiting early")
-        raise SystemExit(1)
+        print("[startup] OPENAI_API_KEY invalid -> continuing (will warn in UI)")
+        # Do not exit; let UI show the error
     try:
         from utils import create_embedding_function
         print("[startup] warming embeddings...")
         fn = create_embedding_function()
         _ = fn(["warmup"])  # ensure model fully loads
         print("[startup] embedding warmup complete")
-    except Exception:
-        print("[startup] embedding warmup failed, exiting")
-        raise SystemExit(1)
+    except Exception as e:
+        print(f"[startup] embedding warmup failed: {e}")
+        # Do not exit; let UI show the error
 
 async def get_agent_deps(header_contains: str | None, source_contains: str | None):
     """Create agent dependencies with configured vector store."""
@@ -203,50 +203,22 @@ def display_message_part(part):
                     elif source_url and source_url.startswith('file://'):
                         st.caption(source_url.replace('file://', ''))
 
+
+from tiered_agent import TieredRagAgent
+
 async def run_agent_with_streaming(user_input):
     try:
         deps: RAGDeps = st.session_state.agent_deps
-        context_text, structured_entries = build_retrieval_context(
-            user_input,
-            deps,
-            n_results=5,
-            header_contains=getattr(deps, "header_contains", None),
-            source_contains=getattr(deps, "source_contains", None),
-        )
-
-        if not context_text.strip():
-            fallback_prompt = (
-                "You do not have any retrieved reference material to cite. Respond to the user's question "
-                "using your general building-code expertise. If the question requires specific code references "
-                "that you cannot confirm, acknowledge that while still providing helpful guidance.\n\n"
-                f"User question: {user_input}"
-            )
-            async with get_agent().run_stream(
-                fallback_prompt,
-                deps=deps,
-                message_history=st.session_state.agent_messages,
-                model_settings={"temperature": 0.4},
-            ) as result:
-                async for message in result.stream_text(delta=True):
-                    yield message
-            st.session_state.last_agent_new_messages = result.new_messages()
-            return
-
-        augmented_question = (
-            "Answer the user using ONLY the context provided. Cite sections in plain text "
-            "(e.g., \"IBC 2018 §1507.2\") when possible. If the context does not contain the answer, "
-            "reply with \"I don't have that information in the current documentation.\" Use a natural tone.\n\n"
-            f"Context:\n{context_text}\n\nUser question: {user_input}"
-        )
-        async with get_agent().run_stream(
-            augmented_question,
-            deps=deps,
-            message_history=st.session_state.agent_messages,
-            model_settings={"temperature": 0.2},
-        ) as result:
-            async for message in result.stream_text(delta=True):
-                yield message
-        st.session_state.last_agent_new_messages = result.new_messages()
+        
+        # Instantiate the tiered agent (could be cached, but lightweight enough to init here)
+        tiered_agent = TieredRagAgent()
+        
+        # Run the full pipeline
+        # The pipeline handles retrieval, reasoning, and polishing internally
+        # and yields progress updates and final text chunks.
+        async for message in tiered_agent.run_pipeline(user_input, deps):
+            yield message
+            
     except ModelHTTPError as e:
         # Re-raise with a sentinel attribute so UI can display a friendly message
         setattr(e, "_is_auth_error", getattr(e, "status_code", None) == 401 or "status_code: 401" in str(e))
@@ -365,7 +337,9 @@ async def main():
             generator = run_agent_with_streaming(user_input)
             try:
                 async for message in generator:
-                    full_response += message
+                    # TieredRagAgent (pydantic_ai) yields the accumulated text so far, NOT the delta.
+                    # So we overwrite full_response instead of appending.
+                    full_response = message
                     message_placeholder.markdown(full_response + "▌")
                 # Final response without the cursor
                 message_placeholder.markdown(full_response)
@@ -398,8 +372,27 @@ async def main():
     # Diagnostics panel
     with st.sidebar.expander("Diagnostics", expanded=False):
         # Quick health surface
+        # NOTE: project_id, dataset_id, table_id are not defined in this snippet.
+        # Assuming they are defined elsewhere or are placeholders for the user.
+        project_id = "your_project_id" # Placeholder
+        dataset_id = "your_dataset_id" # Placeholder
+        table_id = "your_table_id"     # Placeholder
+
+        st.write(f"**Project:** `{project_id}`")
+        st.write(f"**Dataset:** `{dataset_id}`")
+        st.write(f"**Table:** `{table_id}`")
+        
+        # Show resolved backend
         try:
-            st.caption("Health")
+            from utils import resolve_embedding_backend_and_model
+            backend, model = resolve_embedding_backend_and_model()
+            st.write(f"**Embeddings:** `{backend}` / `{model}`")
+        except Exception as e:
+            st.write(f"**Embeddings:** Error detecting ({e})")
+
+        st.write("---")
+        st.write("**API Key Status:**")
+        try:
             st.code(str({
                 "OPENAI_API_KEY_set": bool(os.getenv("OPENAI_API_KEY")),
             }))
