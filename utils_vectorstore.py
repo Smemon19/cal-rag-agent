@@ -135,6 +135,21 @@ class BigQueryVectorStore(VectorStore):
             }))
             raise RuntimeError(error_msg) from e
 
+    @staticmethod
+    def _word_count(text: str) -> int:
+        return len((text or "").split())
+
+    @staticmethod
+    def _filter_short_chunks(results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        min_words = int(os.getenv("MIN_RETRIEVAL_CHUNK_WORDS", "50"))
+        if min_words <= 0:
+            return results
+        filtered: List[Dict[str, Any]] = []
+        for row in results:
+            if BigQueryVectorStore._word_count(str(row.get("content", ""))) >= min_words:
+                filtered.append(row)
+        return filtered
+
     def vector_search(
         self,
         query_embedding: List[float],
@@ -152,6 +167,9 @@ class BigQueryVectorStore(VectorStore):
             dataset=self.dataset,
             table=self.table,
         )
+        results = self._filter_short_chunks(results)
+        if len(results) > n_results:
+            results = results[:n_results]
 
         # Convert BigQuery results to standard format
         ids = [r["chunk_id"] for r in results]
@@ -181,6 +199,9 @@ class BigQueryVectorStore(VectorStore):
             dataset=self.dataset,
             table=self.table,
         )
+        results = self._filter_short_chunks(results)
+        if len(results) > max_results:
+            results = results[:max_results]
 
         # Convert to standard format (with distances for consistency)
         ids = [r["chunk_id"] for r in results]

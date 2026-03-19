@@ -21,9 +21,15 @@ except Exception:
         Agent = None  # type: ignore
         RunContext = None  # type: ignore
 try:
-    from openai import AsyncOpenAI
+    from pydantic_ai.models.vertexai import VertexAIModel
 except Exception:
-    AsyncOpenAI = None  # type: ignore
+    VertexAIModel = None  # type: ignore
+try:
+    from pydantic_ai.models.google import GoogleModel
+    from pydantic_ai.providers.google_vertex import GoogleVertexProvider
+except Exception:
+    GoogleModel = None  # type: ignore
+    GoogleVertexProvider = None  # type: ignore
 
 from utils import (
     resolve_embedding_backend_and_model,
@@ -32,7 +38,6 @@ from utils import (
     make_chunk_metadata,
     get_env_file_path,
     ensure_appdata_scaffold,
-    sanitize_and_validate_openai_key,
     resolve_collection_name,
     create_embedding_function,
     increment_query_count,
@@ -78,13 +83,6 @@ if not (os.getenv("K_SERVICE") or os.getenv("GOOGLE_CLOUD_RUN") or os.getenv("FI
     except Exception:
         pass
 
-# Defer strict API key validation to runtime callers (Streamlit UI or CLI).
-try:
-    sanitize_and_validate_openai_key()
-except Exception:
-    pass
-
-
 @dataclass
 class RAGDeps:
     """Dependencies for the RAG agent."""
@@ -115,8 +113,9 @@ class RagAgent:
         self.embedding_model = embedding_model or emb_model
         print(f"[agent] Embeddings backend='{emb_backend}', model='{self.embedding_model}'")
 
-        # Create vector store based on backend
-        self.vector_store = get_vector_store(backend="bigquery")
+        # Create vector store based on backend.
+        # For BigQuery, collection_name maps to the table to query.
+        self.vector_store = get_vector_store(backend="bigquery", table=resolved_collection)
     
     def smart_chunk_markdown(self, markdown: str, max_len: int = 1000, overlap_chars: int = 150) -> List[str]:
         """Hierarchically split markdown by headers, then by characters with small overlap.
@@ -496,35 +495,153 @@ class RagAgent:
         return pieces
 
 
+def _resolve_model_name() -> str:
+    """Resolve the LLM model name from environment.
+
+    Priority: CAL_MODEL_NAME > MODEL_CHOICE > default (gemini-2.0-flash).
+    This deployment is Vertex-only and expects a Gemini model identifier.
+    """
+    raw = (
+        os.getenv("CAL_MODEL_NAME")
+        or os.getenv("MODEL_CHOICE")
+        or "gemini-2.0-flash"
+    ).strip()
+    return raw
+
+
+def _build_model(model_name: str):
+    """Return a pydantic-ai model object for *model_name*.
+
+    Instantiate ``VertexAIModel`` for Gemini model names using
+    project + region from env, authenticated via ADC.
+    """
+    lower = model_name.lower()
+    if not (
+        lower.startswith("gemini")
+        or lower.startswith("google-vertex:")
+        or lower.startswith("google-gla:")
+    ):
+        raise ValueError(
+            f"CAL_MODEL_NAME must be a Gemini model for Vertex AI, got: '{model_name}'"
+        )
+
+    # Strip provider prefix if user passed e.g. "google-vertex:gemini-2.0-flash"
+    bare_name = model_name.split(":", 1)[1] if ":" in model_name else model_name
+    project_id = (
+        os.getenv("VERTEX_PROJECT_ID")
+        or os.getenv("BQ_PROJECT")
+        or os.getenv("GOOGLE_CLOUD_PROJECT")
+        or None
+    )
+    region = (os.getenv("VERTEX_LOCATION") or "").strip() or "us-central1"
+
+    # Prefer legacy VertexAIModel when available.
+    if VertexAIModel is not None:
+        return VertexAIModel(bare_name, project_id=project_id, region=region)
+
+    # Fallback for newer pydantic-ai where Vertex routing moved to GoogleModel + provider.
+    if GoogleModel is not None and GoogleVertexProvider is not None:
+        provider = GoogleVertexProvider(project_id=project_id, region=region)
+        return GoogleModel(bare_name, provider=provider)
+
+    raise RuntimeError(
+        "No Vertex-compatible model class found in pydantic-ai. "
+        "Install/update pydantic-ai with Vertex support."
+    )
+
+
 def create_agent():
     """Create the RAG agent with proper environment variable loading."""
     if Agent is None:
         raise ImportError(
             "pydantic_ai is required to create the agent. Install it or avoid calling create_agent() at import time."
         )
-    
-    # Ensure correct model choice is loaded
-    model_choice = os.getenv("MODEL_CHOICE", "gpt-4o-mini")
-    print(f"[agent] Initializing agent with model: {model_choice}")
-    
+
+    model_name = _resolve_model_name()
+    model = _build_model(model_name)
+    print(f"[agent] Initializing agent with model: {model_name} (type={type(model).__name__})")
+
     return Agent(
-        model_choice,
+        model,
         deps_type=RAGDeps,
-        model_settings={"tool_choice": "required"},
         system_prompt=(
-            "You are the CAL Engineering Assistant, an expert in building codes and structural engineering. "
-            "Your goal is to be helpful, precise, and conversational. "
-            "When provided with context, use it to answer specific code questions. "
-            "If the user greets you or asks a general question, respond naturally and politely, ignoring the context if it is not relevant. "
-            "Do not say 'I don't have that information' for greetings or general engineering questions."
+            "You are an expert assistant across all topics. "
+            "Use the provided retrieval context as your primary source of truth and answer to the best of your ability. "
+            "If context is incomplete, provide a helpful answer and clearly distinguish what is grounded in context versus general knowledge."
         )
     )
 
-# Initialize agent as None and track the last key used to recreate if it changes
+# Initialize agent as None and track the last model used to recreate if it changes
 agent = None
-_last_openai_key = None
 _last_model_choice = None
+_last_agent_loop_id = None
 _last_retrieve_context: str = ""
+NO_CONTEXT_RESPONSE = (
+    "I couldn't find this answer in your documents. "
+    "Please try rephrasing your question or provide a more specific keyword."
+)
+
+
+def _extract_question_terms(question: str) -> set[str]:
+    raw_terms = re.findall(r"[a-zA-Z]{3,}", (question or "").lower())
+    return {
+        term
+        for term in raw_terms
+        if term not in QUESTION_STOPWORDS and len(term) >= 4
+    }
+
+
+def _filter_merged_for_relevance(question: str, merged: Dict[str, Any]) -> Dict[str, Any]:
+    """Drop weakly relevant retrieval candidates before context assembly."""
+    if not isinstance(merged, dict):
+        return merged
+
+    docs = merged.get("documents", [[]])[0] if isinstance(merged.get("documents"), list) else []
+    metas = merged.get("metadatas", [[]])[0] if isinstance(merged.get("metadatas"), list) else []
+    ids = merged.get("ids", [[]])[0] if isinstance(merged.get("ids"), list) else []
+    distances = merged.get("distances", [[]])[0] if isinstance(merged.get("distances"), list) else []
+    if not docs:
+        return merged
+
+    try:
+        max_distance = float(str(os.getenv("MAX_RETRIEVAL_DISTANCE", "0.82")).strip())
+    except Exception:
+        max_distance = 0.82
+    try:
+        min_overlap = int(str(os.getenv("MIN_QUERY_TERM_OVERLAP", "1")).strip())
+    except Exception:
+        min_overlap = 1
+
+    terms = _extract_question_terms(question)
+    keep_idxs: List[int] = []
+
+    for i, doc in enumerate(docs):
+        meta = metas[i] if i < len(metas) and isinstance(metas[i], dict) else {}
+        haystack = f"{doc or ''} {meta.get('title', '')} {meta.get('section_path', '')}".lower()
+        overlap = sum(1 for term in terms if term in haystack)
+        dist = distances[i] if i < len(distances) and isinstance(distances[i], (int, float)) else None
+        distance_ok = dist is not None and dist <= max_distance
+        overlap_ok = overlap >= min_overlap if terms else True
+        if overlap_ok or distance_ok:
+            keep_idxs.append(i)
+
+    if not keep_idxs:
+        print(
+            f"[retrieval_filter] dropped all candidates raw={len(docs)} "
+            f"max_distance={max_distance} min_overlap={min_overlap}"
+        )
+        return {"ids": [[]], "documents": [[]], "metadatas": [[]], "distances": [[]]}
+
+    print(
+        f"[retrieval_filter] kept={len(keep_idxs)} raw={len(docs)} "
+        f"max_distance={max_distance} min_overlap={min_overlap}"
+    )
+    return {
+        "ids": [[ids[i] for i in keep_idxs if i < len(ids)]],
+        "documents": [[docs[i] for i in keep_idxs]],
+        "metadatas": [[metas[i] for i in keep_idxs if i < len(metas)]],
+        "distances": [[distances[i] for i in keep_idxs if i < len(distances)]],
+    }
 
 
 def build_retrieval_context(
@@ -534,7 +651,8 @@ def build_retrieval_context(
     n_results: int = 5,
     header_contains: Optional[str] = None,
     source_contains: Optional[str] = None,
-) -> str:
+    return_debug: bool = False,
+):
     """Retrieve context synchronously using the orchestrator and stash for verification."""
     embed_fn = create_embedding_function()
     orchestrator = RetrievalOrchestrator(deps.vector_store, embed_fn)
@@ -565,7 +683,11 @@ def build_retrieval_context(
         max_results=max(3, n_results),
     )
     merged = orchestrator._merge_results(vec_res, kw_res, n_results)
+    raw_docs = merged.get("documents", [[]])[0] if isinstance(merged, dict) else []
+    merged = _filter_merged_for_relevance(question, merged)
     formatted_context = format_results_as_context(merged)
+    docs = merged.get("documents", [[]])[0] if isinstance(merged, dict) else []
+    metas = merged.get("metadatas", [[]])[0] if isinstance(merged, dict) else []
 
     structured_text, structured_entries = _build_structured_extracts(
         question,
@@ -583,10 +705,21 @@ def build_retrieval_context(
     parts.append(formatted_context)
 
     context_text = "\n\n".join(part for part in parts if part)
+    debug_payload = {
+        "raw_docs_before_filter": len(raw_docs or []),
+        "raw_docs_count": len(docs or []),
+        "raw_doc_lengths": [len(d or "") for d in (docs or [])[:10]],
+        "raw_meta_keys": [
+            sorted(list((m or {}).keys()))[:20] if isinstance(m, dict) else [type(m).__name__]
+            for m in (metas or [])[:10]
+        ],
+    }
 
     global _last_retrieve_context
     _last_retrieve_context = context_text
     increment_query_count()
+    if return_debug:
+        return context_text, structured_entries, debug_payload
     return context_text, structured_entries
 
 
@@ -683,8 +816,24 @@ def _build_structured_extracts(
             break
 
     if not entries:
-        entries = []
-        entry_objs = []
+        # Fallback for non-code documents: keep top retrieved chunks as generic extracts.
+        for doc, meta in zip(docs or [], metas or []):
+            if not doc:
+                continue
+            snippet = _clean_quote(str(doc)[:220])
+            if not snippet:
+                continue
+            source = (meta or {}).get("title") or (meta or {}).get("source_url") or "Unknown source"
+            entries.append(f"- [Doc §N/A] \"{snippet}\" (Source: {source})")
+            entry_objs.append({
+                "code_label": "Doc",
+                "section": "N/A",
+                "quote": snippet,
+                "source": source,
+                "section_path": (meta or {}).get("section_path", ""),
+            })
+            if len(entries) >= max_entries:
+                break
 
     if rule_text:
         for rule_entry in _parse_rule_snippets(rule_text):
@@ -739,19 +888,25 @@ def _parse_rule_snippets(rule_text: str) -> List[Dict[str, str]]:
 
 
 def get_agent():
-    """Get or create the agent instance, recreating if critical env changes."""
-    global agent, _last_openai_key, _last_model_choice
+    """Get or create the agent instance, recreating if model choice changes."""
+    global agent, _last_model_choice, _last_agent_loop_id
 
-    current_key = os.getenv("OPENAI_API_KEY")
-    current_model = os.getenv("MODEL_CHOICE", "gpt-4o-mini")
+    current_model = _resolve_model_name()
+    try:
+        current_loop_id = id(asyncio.get_running_loop())
+    except RuntimeError:
+        current_loop_id = None
 
-    # Recreate the agent if not present or if the API key/model changed
-    if agent is None or _last_openai_key != current_key or _last_model_choice != current_model:
+    if (
+        agent is None
+        or _last_model_choice != current_model
+        or _last_agent_loop_id != current_loop_id
+    ):
         agent = create_agent()
         _register_tools(agent)
-        _last_openai_key = current_key
         _last_model_choice = current_model
-    
+        _last_agent_loop_id = current_loop_id
+
     return agent
 
 
@@ -833,13 +988,15 @@ async def run_rag_agent(
     collection_name: Optional[str] = None,
     db_directory: str = "",
     embedding_model: Optional[str] = None,
-    n_results: int = 5
+    n_results: int = 5,
+    table_name: Optional[str] = None,
 ) -> str:
     """Run the RAG agent to answer a question.
 
     Args:
         question: The question to answer.
-        collection_name: Name of the collection to use (for Chroma backend).
+        collection_name: Logical collection/table name override.
+        table_name: BigQuery table name override. If set, takes precedence.
         db_directory: Directory where vector store data is stored (for Chroma backend).
         embedding_model: Name of the embedding model to use.
         n_results: Number of results to return from the retrieval.
@@ -849,16 +1006,17 @@ async def run_rag_agent(
     """
     # Resolve collection once for this run
     resolved_collection = resolve_collection_name(collection_name)
+    resolved_table = table_name or resolved_collection
 
     # Resolve vector backend and create appropriate store
     backend_name, backend_config = resolve_vector_backend()
 
     if backend_name == "bigquery":
-        vector_store = get_vector_store(backend="bigquery")
+        vector_store = get_vector_store(backend="bigquery", table=resolved_table)
     else:
         # Fallback to BigQuery if unknown backend is resolved, or error out.
         # Since we removed Chroma, we default to BigQuery.
-        vector_store = get_vector_store(backend="bigquery")
+        vector_store = get_vector_store(backend="bigquery", table=resolved_table)
 
     # Create dependencies
     _, detected_model = resolve_embedding_backend_and_model()
@@ -867,9 +1025,10 @@ async def run_rag_agent(
     deps = RAGDeps(
         vector_store=vector_store,
         embedding_model=effective_model,
-        collection_name=resolved_collection if backend_name == "chroma" else "docs_ibc_v2",
+        collection_name=resolved_table if backend_name == "bigquery" else resolved_collection,
         vector_backend=backend_name
     )
+    print(f"[run_rag_agent] backend={backend_name} collection={deps.collection_name} table={resolved_table}")
 
     context_text, context_entries = build_retrieval_context(
         question,
@@ -878,19 +1037,12 @@ async def run_rag_agent(
         header_contains=getattr(deps, "header_contains", None),
         source_contains=getattr(deps, "source_contains", None),
     )
+    context_preview = (context_text or "")[:200].replace("\n", " ")
+    print(f"[run_rag_agent] prompt_context_len={len(context_text or '')} preview={context_preview!r}")
 
     if not context_text.strip():
-        fallback_prompt = (
-            "You do not have any retrieved reference material to cite. Respond to the user's question "
-            "using your general building-code expertise. If the question requires specific code references "
-            "that you cannot confirm, acknowledge that while still providing helpful guidance."
-        )
-        result = await get_agent().run(
-            f"{fallback_prompt}\n\nUser question: {question}",
-            deps=deps,
-            model_settings={"temperature": 0.4},
-        )
-        return result.data
+        print("[run_rag_agent] no usable retrieval context; returning explicit no-context response")
+        return NO_CONTEXT_RESPONSE
 
     augmented_question = (
         "Answer the user's question. Use the provided context as your primary source for code sections and regulations. "
@@ -977,6 +1129,20 @@ async def run_rag_agent(
     return answer_text
 
 
+def _run_async(coro):
+    """Run a coroutine on a persistent process event loop."""
+    global _runtime_loop
+    try:
+        loop = _runtime_loop
+    except NameError:
+        loop = None
+    if loop is None or loop.is_closed():
+        loop = asyncio.new_event_loop()
+        _runtime_loop = loop
+    asyncio.set_event_loop(loop)
+    return loop.run_until_complete(coro)
+
+
 def main():
     """Main function to parse arguments and run the RAG agent."""
     parser = argparse.ArgumentParser(description="Run a Pydantic AI agent with RAG using ChromaDB")
@@ -993,7 +1159,7 @@ def main():
     print(f"[agent] Using ChromaDB collection: '{resolved_name}'")
 
     # Run the agent
-    response = asyncio.run(run_rag_agent(
+    response = _run_async(run_rag_agent(
         args.question,
         collection_name=resolved_name,
         db_directory=args.db_dir,

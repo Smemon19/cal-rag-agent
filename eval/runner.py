@@ -12,6 +12,17 @@ from rag_agent import run_rag_agent
 from utils import resolve_collection_name
 
 
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(coro)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    return result
+
+
 async def evaluate(collection: str, limit: int | None) -> Dict[str, Any]:
     dataset_path = Path("eval/dataset.jsonl")
     items: List[Dict[str, Any]] = []
@@ -70,7 +81,7 @@ def main():
     collection = resolve_collection_name(args.collection)
     print(f"[eval] Using collection: {collection}")
 
-    result = asyncio.run(evaluate(collection, args.limit))
+    result = _run_async(evaluate(collection, args.limit))
     write_report(result, args.out)
 
 

@@ -13,14 +13,10 @@ Quick triage
 Tail logs (live):
 gcloud run services logs tail "$SERVICE" --region "$REGION" --stream
 
-Ensure secret accessor IAM (uses actual service account):
-
+Ensure service account has Vertex AI and BigQuery roles:
 SA=$(gcloud run services describe "$SERVICE" --region "$REGION" --format='value(spec.template.spec.serviceAccountName)')
-gcloud secrets add-iam-policy-binding openai-api-key \
-  --member="serviceAccount:$SA" \
-  --role="roles/secretmanager.secretAccessor"
-
-Verify image includes chroma_db/ and that CHROMA_DIR=/tmp/.calrag/chroma is set.
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$SA" --role="roles/aiplatform.user"
+gcloud projects add-iam-policy-binding "$PROJECT_ID" --member="serviceAccount:$SA" --role="roles/bigquery.dataEditor"
 
 If timeouts: try lower latency
 gcloud run services update "$SERVICE" --region "$REGION" --min-instances=1
@@ -34,10 +30,9 @@ trap 'on_exit' EXIT
 
 # -------- Inputs & Defaults --------
 PROJECT_ID=${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null || true)}
-REGION=${REGION:-us-central1}
+REGION=${REGION:-us-east1}
 SERVICE=${SERVICE:-cal-rag-agent}
 ART_REPO=${ART_REPO:-cal-rag-repo}
-OPENAI_KEY=${OPENAI_KEY:-}
 CPU=${CPU:-1}
 MEMORY=${MEMORY:-1Gi}
 CONCURRENCY=${CONCURRENCY:-80}
@@ -46,12 +41,18 @@ MIN_INSTANCES=${MIN_INSTANCES:-0}
 MAX_INSTANCES=${MAX_INSTANCES:-3}
 SERVICE_ACCOUNT=${SERVICE_ACCOUNT:-}
 
+# Vertex AI / embedding / LLM config (with sensible defaults)
+VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID:-${PROJECT_ID}}
+VERTEX_LOCATION=${VERTEX_LOCATION:-${REGION}}
+VERTEX_EMBEDDING_MODEL=${VERTEX_EMBEDDING_MODEL:-text-embedding-005}
+CAL_MODEL_NAME=${CAL_MODEL_NAME:-gemini-1.5-pro}
+BQ_PROJECT=${BQ_PROJECT:-${PROJECT_ID}}
+BQ_DATASET=${BQ_DATASET:-cal_rag}
+BQ_TABLE=${BQ_TABLE:-documents}
+EMBEDDING_BACKEND=${EMBEDDING_BACKEND:-vertex}
+
 if [[ -z "${PROJECT_ID}" ]]; then
   echo "PROJECT_ID is not set and no gcloud default project configured." >&2
-  exit 2
-fi
-if [[ -z "${OPENAI_KEY}" ]]; then
-  echo "OPENAI_KEY is required (export OPENAI_KEY=...)" >&2
   exit 2
 fi
 
@@ -59,16 +60,7 @@ gcloud config set project "$PROJECT_ID" >/dev/null
 
 # -------- Enable Required APIs (idempotent) --------
 echo "[info] Ensuring required APIs are enabled..."
-gcloud services enable run.googleapis.com artifactregistry.googleapis.com secretmanager.googleapis.com cloudbuild.googleapis.com --quiet
-
-# -------- Secret Manager (idempotent) --------
-echo "[info] Ensuring Secret Manager secret exists and is updated..."
-SECRET_NAME=openai-api-key
-if gcloud secrets describe "$SECRET_NAME" --quiet >/dev/null 2>&1; then
-  printf "%s" "$OPENAI_KEY" | gcloud secrets versions add "$SECRET_NAME" --data-file=- --quiet >/dev/null
-else
-  printf "%s" "$OPENAI_KEY" | gcloud secrets create "$SECRET_NAME" --replication-policy=automatic --data-file=- --quiet >/dev/null
-fi
+gcloud services enable run.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com aiplatform.googleapis.com --quiet
 
 # -------- Artifact Registry (idempotent) --------
 echo "[info] Ensuring Artifact Registry repo exists..."
@@ -99,8 +91,7 @@ COMMON_ARGS=(
   --timeout="$TIMEOUT"
   --max-instances="$MAX_INSTANCES"
   --min-instances="$MIN_INSTANCES"
-  --set-env-vars=FIREBASE_APP_HOSTING=true
-  --set-secrets=OPENAI_API_KEY=openai-api-key:latest
+  --set-env-vars="GOOGLE_CLOUD_RUN=true,EMBEDDING_BACKEND=${EMBEDDING_BACKEND},VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID},VERTEX_LOCATION=${VERTEX_LOCATION},VERTEX_EMBEDDING_MODEL=${VERTEX_EMBEDDING_MODEL},CAL_MODEL_NAME=${CAL_MODEL_NAME},BQ_PROJECT=${BQ_PROJECT},BQ_DATASET=${BQ_DATASET},BQ_TABLE=${BQ_TABLE},VECTOR_BACKEND=bigquery"
 )
 if [[ -n "$SERVICE_ACCOUNT" ]]; then
   COMMON_ARGS+=(--service-account="$SERVICE_ACCOUNT")
@@ -108,16 +99,11 @@ fi
 
 gcloud run deploy "$SERVICE" --image "$IMAGE" "${COMMON_ARGS[@]}" --quiet
 
-# -------- Ensure IAM for secret access --------
-echo "[info] Ensuring service account has secret accessor role..."
+# -------- Ensure IAM for Vertex AI access --------
+echo "[info] Ensuring service account has required IAM roles..."
 SA=$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(template.spec.serviceAccountName)')
 SA=${SA:-"$(gcloud projects describe "$PROJECT_ID" --format='value(projectNumber)')-compute@developer.gserviceaccount.com"}
-if ! gcloud secrets get-iam-policy "$SECRET_NAME" --format=json | grep -q "$SA"; then
-  gcloud secrets add-iam-policy-binding "$SECRET_NAME" \
-    --member="serviceAccount:$SA" \
-    --role="roles/secretmanager.secretAccessor" \
-    --quiet >/dev/null
-fi
+echo "[info] Service account: $SA"
 
 # -------- Output URL & Smoke Check --------
 URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')
@@ -127,11 +113,11 @@ echo -n "[probe] /?healthz=1 -> "
 HC=$(curl -s -o /dev/null -w "%{http_code}" "$URL/?healthz=1" || true)
 echo "$HC"
 if [[ "$HC" != "200" ]]; then
-  echo "[fail] Health probe returned $HC. Check logs and ensure OPENAI_KEY is valid." >&2
+  echo "[fail] Health probe returned $HC. Check logs and verify ADC/service account." >&2
   echo "Runbook:"
   echo "  - gcloud run services describe $SERVICE --region $REGION"
   echo "  - gcloud run services logs read $SERVICE --region $REGION --limit 200"
-  echo "  - Verify Secret Manager: gcloud secrets versions list openai-api-key"
+  echo "  - Verify service account has aiplatform.user and bigquery.dataEditor roles"
   exit 4
 fi
 

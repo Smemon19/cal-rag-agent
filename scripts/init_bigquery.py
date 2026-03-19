@@ -88,7 +88,7 @@ def init_bigquery():
         
         # Insert dummy row to allow index creation (BigQuery needs at least one row to calc stats)
         print("Inserting dummy row to initialize index...")
-        dummy_embedding = [0.0] * 1536 # Default to OpenAI dim
+        dummy_embedding = [0.0] * 768  # Vertex AI text-embedding-005 dimension
         rows_to_insert = [{
             "chunk_id": "init_dummy",
             "content": "Initialization dummy row",

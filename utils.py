@@ -72,23 +72,27 @@ def ensure_appdata_scaffold() -> None:
 
     env_path = Path(get_env_file_path())
     if not env_path.exists():
-        # Minimal template for first run
         template = (
             "# Cal RAG Agent configuration\n"
-            "# Fill in your API key if using OpenAI models.\n"
-            "MODEL_CHOICE=gpt-4o-mini\n"
-            "OPENAI_API_KEY=\n"
-            "# Embeddings backend: sentence (default) or openai\n"
-            "EMBEDDING_BACKEND=sentence\n"
-            "# Optional sentence-transformers model\n"
-            "SENTENCE_MODEL=all-MiniLM-L6-v2\n"
+            "VECTOR_BACKEND=bigquery\n"
+            "BQ_PROJECT=badgers-487618\n"
+            "BQ_DATASET=cal_rag\n"
+            "BQ_TABLE=documents\n"
+            "# Embeddings backend: vertex (default), sentence, or openai\n"
+            "EMBEDDING_BACKEND=vertex\n"
+            "VERTEX_PROJECT_ID=badgers-487618\n"
+            "VERTEX_LOCATION=us-east1\n"
+            "VERTEX_EMBEDDING_MODEL=text-embedding-005\n"
+            "# LLM model (Vertex AI Gemini)\n"
+            "CAL_MODEL_NAME=gemini-1.5-pro\n"
             "# Default collection name for UI and ingest\n"
-            "RAG_COLLECTION_NAME=docs\n"
+            "RAG_COLLECTION_NAME=default\n"
+            "# (Optional) OpenAI - only needed if EMBEDDING_BACKEND=openai\n"
+            "# OPENAI_API_KEY=\n"
         )
         try:
             env_path.write_text(template, encoding="utf-8")
         except Exception:
-            # Best-effort; continue without blocking
             pass
 
 def resolve_overlap_chars(cli_value: Optional[int] = None) -> int:
@@ -169,7 +173,7 @@ def resolve_embedding_backend_and_model() -> tuple[str, str]:
         "resolved_backend": backend
     }))
 
-    if backend not in {"sentence", "openai"}:
+    if backend not in {"sentence", "openai", "vertex"}:
         if backend is not None:
             print(f"[embeddings] Warning: Unknown EMBEDDING_BACKEND='{backend_raw}'. Falling back to 'sentence'.")
         backend = "sentence"
@@ -191,6 +195,12 @@ def resolve_embedding_backend_and_model() -> tuple[str, str]:
             model = (detected_model or "text-embedding-3-large").strip()
         if not model:
             model = "text-embedding-3-large"
+    elif backend == "vertex":
+        model = (os.getenv("VERTEX_EMBEDDING_MODEL") or "").strip()
+        if not model:
+            model = (detected_model or "text-embedding-005").strip()
+        if not model:
+            model = "text-embedding-005"
     else:
         model = (os.getenv("SENTENCE_MODEL") or "").strip()
         if not model:
@@ -201,15 +211,32 @@ def resolve_embedding_backend_and_model() -> tuple[str, str]:
     return backend, model
 
 
+def _requires_openai() -> bool:
+    """Return True only when an OpenAI backend is explicitly selected."""
+    emb = (os.getenv("EMBEDDING_BACKEND") or "").strip().lower()
+    model = (os.getenv("CAL_MODEL_NAME") or os.getenv("MODEL_CHOICE") or "").strip().lower()
+    if emb == "openai":
+        return True
+    if model.startswith("gpt") or model.startswith("o1") or model.startswith("o3"):
+        return True
+    return False
+
+
 def sanitize_and_validate_openai_key() -> None:
     """Sanitize OPENAI_API_KEY from environment and validate basic format.
 
-    - Do not read from repo .env; only environment or OPENAI_API_KEY_FILE if provided by platform.
-    - Trim whitespace and quotes; persist sanitized value to os.environ.
-    - Validate prefix: accepts sk-, sk-live-, or sk-proj-; on invalid, record error for readiness gate.
-    - Record masked prefix (first 5 chars + '…') for diagnostics only; never log full key.
+    When Vertex / non-OpenAI backends are selected, validation is a no-op
+    so the app can start without an OpenAI key.
     """
     global _KEY_SANITIZED_PREFIX, _KEY_VALIDATED, _KEY_VALIDATION_ERROR
+
+    # When OpenAI is not needed, mark as valid and return early
+    if not _requires_openai():
+        _KEY_VALIDATED = True
+        _KEY_VALIDATION_ERROR = ""
+        _KEY_SANITIZED_PREFIX = "(not needed)"
+        return
+
     try:
         key = os.getenv("OPENAI_API_KEY", "")
         key_file = os.getenv("OPENAI_API_KEY_FILE", "")
@@ -229,14 +256,12 @@ def sanitize_and_validate_openai_key() -> None:
             _KEY_VALIDATION_ERROR = "OPENAI_API_KEY missing"
             _KEY_SANITIZED_PREFIX = ""
             return
-        # Prefix validation - accept standard sk- as well as sk-live- and sk-proj-
         if not key.startswith("sk-"):
             _KEY_VALIDATED = False
             _KEY_VALIDATION_ERROR = "OPENAI_API_KEY has unexpected prefix (should start with sk-)"
         else:
             _KEY_VALIDATED = True
             _KEY_VALIDATION_ERROR = ""
-        # Masked prefix for UI (first 5 chars)
         try:
             _KEY_SANITIZED_PREFIX = (key[:5] + "…") if key else ""
         except Exception:
@@ -270,15 +295,22 @@ def compute_embedding_fingerprint() -> Dict[str, Any]:
             from sentence_transformers import SentenceTransformer as _ST
             st_model = _ST(model)
             dim = int(getattr(getattr(st_model, "get_sentence_embedding_dimension", lambda: None)(), "__int__", lambda: None)() or 384)
+        elif backend == "vertex":
+            _vertex_dims = {
+                "text-embedding-005": 768,
+                "text-embedding-004": 768,
+                "text-multilingual-embedding-002": 768,
+                "gemini-embedding-001": 768,
+            }
+            dim = _vertex_dims.get(model, 768)
         else:
-            # Known dims for common OpenAI models (fallbacks)
             guess = {
                 "text-embedding-3-large": 3072,
                 "text-embedding-3-small": 1536,
             }
             dim = guess.get(os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-large"), 1536)
     except Exception:
-        dim = 384 if backend == "sentence" else 1536
+        dim = 384 if backend == "sentence" else (768 if backend == "vertex" else 1536)
     _EMBEDDING_FINGERPRINT = {
         "backend": backend,
         "model": model,
@@ -331,10 +363,17 @@ def create_embedding_function():
     except Exception:
         embed_cache_size = 2048
 
+    if backend == "vertex":
+        from utils_vertex import VertexEmbeddingFunction
+        fn = VertexEmbeddingFunction(model_name=model)
+        if embed_cache_size > 0:
+            fn = _wrap_embedding_with_lru_cache(fn, backend, model, embed_cache_size)
+        _EMBEDDING_FUNCTION_CACHE[cache_key] = fn
+        return fn
+
     if backend == "openai":
         api_key = os.getenv("OPENAI_API_KEY", "").strip()
         if not api_key:
-            # CRITICAL: Do not fallback. Raise error so user knows key is missing.
             raise RuntimeError(
                 "OPENAI_API_KEY is required when EMBEDDING_BACKEND=openai. Set it in your environment or .env."
             )
@@ -345,10 +384,6 @@ def create_embedding_function():
         return fn
 
     # Default: sentence-transformers
-    # Only reach here if backend != 'openai'
-    if backend == "openai":
-         # Should be unreachable due to raise above, but safety check
-         raise RuntimeError("Unexpected state: OpenAI backend fell through to local model loader.")
     # Proactively prewarm the model to avoid partial downloads in read-only/home-restricted envs
     try:
         try:
@@ -403,6 +438,9 @@ def _wrap_embedding_with_lru_cache(base_fn: Any, backend: str, model: str, capac
             if "text-embedding-3-large" in model_name: self._dim = 3072
             elif "text-embedding-3-small" in model_name: self._dim = 1536
             elif "ada-002" in model_name: self._dim = 1536
+            elif "text-embedding-005" in model_name: self._dim = 768
+            elif "text-embedding-004" in model_name: self._dim = 768
+            elif "gemini-embedding" in model_name: self._dim = 768
 
         def name(self) -> str:
             # Expose a stable name for Chroma's embedding function interface

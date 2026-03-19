@@ -46,6 +46,18 @@ from utils_crawler import (
     smart_chunk_markdown
 )
 
+
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(coro)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    return result
+
+
 async def _crawl_many_with_retry(crawler: AsyncWebCrawler, urls: List[str]):
     # New API: arun_many(urls, ...)
     # cache_mode might be a string or enum, let's try simple first
@@ -150,7 +162,7 @@ def main():
             )
 
     # Run the async function
-    asyncio.run(process_input())
+    _run_async(process_input())
 
 if __name__ == "__main__":
     main()

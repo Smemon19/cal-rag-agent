@@ -9,6 +9,17 @@ from utils import resolve_embedding_backend_and_model
 # Load environment
 dotenv.load_dotenv(override=True)
 
+
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(coro)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    return result
+
 async def test_question(agent, deps, question, label):
     print(f"\n[{label}] Testing: {question}\n")
     print("-" * 50)
@@ -56,4 +67,4 @@ async def main():
     print("\nDone.")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    _run_async(main())

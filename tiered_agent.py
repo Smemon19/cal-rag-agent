@@ -3,7 +3,7 @@ import logging
 import json
 from typing import AsyncGenerator
 from pydantic_ai import Agent
-from rag_agent import RAGDeps, build_retrieval_context
+from rag_agent import RAGDeps, build_retrieval_context, _build_model, _resolve_model_name
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -19,42 +19,50 @@ class TieredRagAgent:
     """
 
     def __init__(self):
-        model_name = os.getenv("CAL_MODEL_NAME", "gpt-4o") # Default to gpt-4o if not set
-        
-        # Master System Prompt
+        model_name = _resolve_model_name()
+        model = _build_model(model_name)
+        logger.info(f"TieredRagAgent using model: {model_name} (type={type(model).__name__})")
+
         self.system_prompt = (
-            "You are a friendly, helpful Structural Engineer AI assistant. "
-            "You specialize in structural calculations, building codes (ASCE 7, ACI 318, AISC SCM, IBC, etc.), "
-            "and solving engineering problems.\n\n"
-            "Your responses should be:\n"
-            "1. **Detailed and Proper**: Explain your steps, cite codes where applicable, and show your work.\n"
-            "2. **Conversational and Friendly**: Be helpful and approachable. Engange with the user naturaly.\n"
-            "3. **Technically Accurate**: Prioritize correctness in your calculations and code interpretations.\n\n"
-            "If retrieval context is provided, use it to ground your answer. "
-            "If no context is found, rely on your internal expert knowledge to help the user."
+            "You are an expert assistant across all topics.\n\n"
+            "When retrieval context is provided, treat it as your primary source of truth and answer using it first. "
+            "If context is partial or missing, still provide the best helpful answer you can and clearly label what is "
+            "from context versus general knowledge. Keep responses clear, practical, and conversational."
         )
-        
-        # Initialize Agent with system_prompt
-        self.agent = Agent(model_name, deps_type=RAGDeps, system_prompt=self.system_prompt)
+
+        self.agent = Agent(model, deps_type=RAGDeps, system_prompt=self.system_prompt)
 
     async def run_pipeline(self, user_question: str, deps: RAGDeps) -> AsyncGenerator[str, None]:
         """
         Executes the simplified pipeline: Retrieval -> Inference -> Stream.
         """
         logger.info(f"Pipeline started for query: {user_question[:50]}...")
+        logger.info(
+            "Pipeline deps: id=%s collection=%s vector_table=%s",
+            id(deps),
+            getattr(deps, "collection_name", ""),
+            getattr(getattr(deps, "vector_store", None), "table", ""),
+        )
 
         # --- STEP 1: SILENT RETRIEVAL ---
         context_str = ""
         try:
             # We do NOT yield any status to the UI. It runs in background.
-            context_text, structured_entries = build_retrieval_context(
+            context_text, structured_entries, retrieval_debug = build_retrieval_context(
                 user_question,
                 deps,
                 n_results=5,
                 header_contains=getattr(deps, "header_contains", None),
                 source_contains=getattr(deps, "source_contains", None),
+                return_debug=True,
             )
-            
+            logger.info(
+                "Raw retrieval debug: docs=%s doc_lengths=%s meta_keys=%s",
+                retrieval_debug.get("raw_docs_count", 0),
+                retrieval_debug.get("raw_doc_lengths", []),
+                retrieval_debug.get("raw_meta_keys", []),
+            )
+
             if structured_entries:
                 # Format context for the LLM
                 formatted_entries = []
@@ -65,6 +73,9 @@ class TieredRagAgent:
                     )
                 context_str = "\n\n".join(formatted_entries)
                 logger.info(f"Retrieval success: found {len(structured_entries)} chunks.")
+            elif context_text.strip():
+                context_str = context_text
+                logger.info("Retrieval had no structured entries; falling back to raw context.")
             else:
                 logger.info("Retrieval returned no chunks.")
 
@@ -83,6 +94,11 @@ class TieredRagAgent:
             )
         else:
             user_prompt = user_question
+        context_preview = context_str[:200].replace("\n", " ")
+        logger.info(
+            "Agent prompt context preview (first 200 chars): %r",
+            context_preview,
+        )
 
         try:
             # Run the agent with specific system prompt and user content

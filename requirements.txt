@@ -5,11 +5,10 @@ huggingface-hub==0.24.6
 # Pin torch to prevent massive re-downloads and resolution hangs
 torch==2.2.2
 python-dotenv==1.0.1
-openai>=1.61.0
 pydantic>=2.8.2
 tenacity==8.3.0
 # Pin these to prevent metadata/resolution slowness
-pydantic-ai==0.0.24
+pydantic-ai[vertexai]==0.0.24
 psutil
 more-itertools
 
@@ -22,6 +21,8 @@ requests
 beautifulsoup4
 pytest
 google-cloud-bigquery>=3.10.0
+google-cloud-aiplatform
+google-auth>=2.20.0
 protobuf==5.29.5
 grpcio==1.76.0
 grpcio-status==1.60.0
@@ -37,3 +38,9 @@ opentelemetry-instrumentation==0.59b0
 opentelemetry-instrumentation-asgi==0.59b0
 opentelemetry-instrumentation-fastapi==0.59b0
 logfire==4.15.1
+bcrypt
+streamlit-authenticator
+google-cloud-secret-manager
+python-docx
+google-cloud-storage
+pdfplumber

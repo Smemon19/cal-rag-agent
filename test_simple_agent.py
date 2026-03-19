@@ -7,6 +7,17 @@ import rag_agent
 # Mock retrieval to avoid API calls
 rag_agent.build_retrieval_context = MagicMock(return_value=("Mock Context", [{"quote": "Info", "code_label": "TestDoc"}]))
 
+
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(coro)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    return result
+
 # Simple mock for RAGDeps
 class MockDeps:
     class MockVectorStore:
@@ -41,4 +52,4 @@ async def main():
         print(f"FAILED: {e}")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    _run_async(main())

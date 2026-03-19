@@ -5,6 +5,17 @@ from pydantic_ai import Agent
 # Simple agent without RAG deps, just to test stream behavior
 agent = Agent("gpt-5-mini")
 
+
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(coro)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    return result
+
 async def main():
     print("Testing stream...")
     # Using a simple prompt
@@ -13,4 +24,4 @@ async def main():
             print(f"|{chunk}|")
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    _run_async(main())

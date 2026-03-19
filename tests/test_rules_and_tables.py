@@ -9,8 +9,19 @@ from rag_agent import run_rag_agent
 from verify import verify_answer
 
 
+def _run_async(coro):
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(coro)
+    finally:
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.close()
+    return result
+
+
 def ask(q: str) -> str:
-    return asyncio.run(run_rag_agent(q, n_results=5))
+    return _run_async(run_rag_agent(q, n_results=5))
 
 
 def test_slate_underlayment_116mph():

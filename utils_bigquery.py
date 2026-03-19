@@ -18,19 +18,28 @@ _BQ_LAST_STATUS: Dict[str, Any] = {}
 _BQ_EMBED_CONFIG_CACHE: Dict[tuple[str, str, str], tuple[Optional[str], Optional[str]]] = {}
 
 
+def get_env_first(*names: str, default: Optional[str] = None) -> Optional[str]:
+    """Return the first non-empty env var value from *names*, or *default*."""
+    for name in names:
+        val = (os.getenv(name) or "").strip()
+        if val:
+            return val
+    return default
+
+
 def get_bq_project() -> str:
-    """Get BigQuery project ID from environment."""
-    return os.getenv("BQ_PROJECT", "cal-rag-agent")
+    """Get BigQuery project ID from environment with fallbacks."""
+    return get_env_first("BQ_PROJECT", "BQ_PROJECT_ID", "VERTEX_PROJECT_ID", "GOOGLE_CLOUD_PROJECT", default="badgers-487618") or "badgers-487618"
 
 
 def get_bq_dataset() -> str:
     """Get BigQuery dataset ID from environment."""
-    return os.getenv("BQ_DATASET", "calrag")
+    return get_env_first("BQ_DATASET", default="cal_rag") or "cal_rag"
 
 
 def get_bq_table() -> str:
     """Get BigQuery table name from environment."""
-    return os.getenv("BQ_TABLE", "documents")
+    return get_env_first("BQ_TABLE", default="documents") or "documents"
 
 
 def get_full_table_id(
