@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Policy engine</title>
+  <style>
+    :root {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+      color: #1a1a1a;
+      background: #f4f4f5;
+    }
+    body { max-width: 52rem; margin: 2rem auto; padding: 0 1rem; }
+    h1 { font-size: 1.35rem; font-weight: 650; margin: 0 0 0.25rem; }
+    p.sub { margin: 0 0 1.25rem; color: #52525b; font-size: 0.9rem; }
+    label { display: block; font-size: 0.8rem; font-weight: 600; margin-bottom: 0.35rem; color: #3f3f46; }
+    textarea {
+      width: 100%; min-height: 5.5rem; padding: 0.65rem 0.75rem;
+      border: 1px solid #d4d4d8; border-radius: 8px; font-size: 0.95rem;
+      box-sizing: border-box; resize: vertical; background: #fff;
+    }
+    .row { display: flex; gap: 0.75rem; align-items: center; margin-top: 0.75rem; flex-wrap: wrap; }
+    button {
+      background: #18181b; color: #fafafa; border: none; padding: 0.55rem 1rem;
+      border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer;
+    }
+    button:disabled { opacity: 0.55; cursor: not-allowed; }
+    button:hover:not(:disabled) { background: #27272a; }
+    #status { margin-top: 1rem; font-size: 0.85rem; color: #71717a; min-height: 1.25em; }
+    #status.err { color: #b91c1c; }
+    .card {
+      margin-top: 1.25rem; padding: 1rem 1.1rem; background: #fff;
+      border: 1px solid #e4e4e7; border-radius: 10px;
+    }
+    .card h2 { margin: 0 0 0.5rem; font-size: 0.95rem; color: #3f3f46; }
+    .answer { font-size: 1.05rem; line-height: 1.5; white-space: pre-wrap; }
+    details { margin-top: 0.75rem; font-size: 0.82rem; }
+    details summary { cursor: pointer; font-weight: 600; color: #52525b; user-select: none; }
+    pre {
+      margin: 0.5rem 0 0; padding: 0.65rem; background: #fafafa; border-radius: 6px;
+      overflow-x: auto; font-size: 0.78rem; line-height: 1.4; border: 1px solid #e4e4e7;
+    }
+  </style>
+</head>
+<body>
+  <h1>Policy engine</h1>
+  <p class="sub">Question → LLM search plan → Postgres → answer (same service as <code>runner.py</code>).</p>
+
+  <label for="q">Your question</label>
+  <textarea id="q" placeholder="e.g. If I do internal marketing work, what do I bill it to?"></textarea>
+  <div class="row">
+    <button type="button" id="go">Get answer</button>
+  </div>
+  <div id="status"></div>
+
+  <div id="out" hidden>
+    <div class="card">
+      <h2>Answer</h2>
+      <div class="answer" id="answer"></div>
+      <details>
+        <summary>Filters, SQL &amp; rows</summary>
+        <pre id="meta"></pre>
+      </details>
+    </div>
+  </div>
+
+  <script>
+    const $q = document.getElementById("q");
+    const $go = document.getElementById("go");
+    const $status = document.getElementById("status");
+    const $out = document.getElementById("out");
+    const $answer = document.getElementById("answer");
+    const $meta = document.getElementById("meta");
+
+    async function run() {
+      const question = $q.value.trim();
+      if (!question) {
+        $status.textContent = "Enter a question.";
+        $status.classList.add("err");
+        return;
+      }
+      $status.classList.remove("err");
+      $status.textContent = "Running pipeline…";
+      $go.disabled = true;
+      $out.hidden = true;
+      try {
+        const res = await fetch("/ask", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ question }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          throw new Error(data.error || res.statusText || "Request failed");
+        }
+        $answer.textContent = data.answer || "";
+        $meta.textContent = JSON.stringify({
+          search_spec: data.search_spec,
+          sql: data.sql,
+          params: data.params,
+          used_relaxed_query: data.used_relaxed_query,
+          relaxed_sql: data.relaxed_sql,
+          relaxed_params: data.relaxed_params,
+          row_count: data.row_count,
+          rows: data.rows,
+        }, null, 2);
+        $out.hidden = false;
+        $status.textContent = "Done.";
+      } catch (e) {
+        $status.textContent = e.message || String(e);
+        $status.classList.add("err");
+      } finally {
+        $go.disabled = false;
+      }
+    }
+
+    $go.addEventListener("click", run);
+    $q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) run();
+    });
+  </script>
+</body>
+</html>
