@@ -1,0 +1,176 @@
+[
+  {
+    "question": "How do I install the Bitwarden browser extension?",
+    "error": "\"requested_fields\" must be a non-empty array of column names."
+  },
+  {
+    "question": "How do I export passwords from Microsoft Edge and move them into Bitwarden?",
+    "attempt": 3,
+    "row_count": 0,
+    "used_relaxed_query": false,
+    "search_spec": {
+      "table": "policies_v2",
+      "filters": {
+        "policy_category": [
+          "security",
+          "data management"
+        ],
+        "status": "active"
+      },
+      "requested_fields": [
+        "topic",
+        "subtopic",
+        "condition_text",
+        "action_text",
+        "approval_required",
+        "approver",
+        "source_quote"
+      ],
+      "comparison": false,
+      "reasoning_note": "Filters include relevant policy categories related to security and data management, which may cover password handling and export processes."
+    },
+    "sql": "SELECT \"topic\", \"subtopic\", \"condition_text\", \"action_text\", \"approval_required\", \"approver\", \"source_quote\"\nFROM policies_v2\nWHERE \"policy_category\" = ANY(%s) AND \"status\" = %s\nLIMIT 10",
+    "params": [
+      [
+        "security",
+        "data management"
+      ],
+      "active"
+    ],
+    "answer": "No policy found",
+    "rows": []
+  },
+  {
+    "question": "What should I do if my Bitwarden verification email does not show up?",
+    "attempt": 1,
+    "row_count": 10,
+    "used_relaxed_query": false,
+    "search_spec": {
+      "table": "policies_v2",
+      "filters": {
+        "status": "active"
+      },
+      "requested_fields": [
+        "condition_text",
+        "action_text",
+        "exception_text",
+        "consequence_text",
+        "source_quote"
+      ],
+      "comparison": false,
+      "reasoning_note": "The filters focus on active policies that may provide guidance on actions to take in case of issues, without narrowing down to specific categories or topics since the question is general."
+    },
+    "sql": "SELECT \"condition_text\", \"action_text\", \"exception_text\", \"consequence_text\", \"source_quote\"\nFROM policies_v2\nWHERE \"status\" = %s\nLIMIT 10",
+    "params": [
+      "active"
+    ],
+    "answer": "No policy found",
+    "rows": [
+      {
+        "condition_text": "normal biweekly payroll cycle",
+        "action_text": "Employees are paid every other Friday.",
+        "exception_text": "If payday falls on a bank holiday, payroll is issued on the previous business day.",
+        "consequence_text": null,
+        "source_quote": "Employees are paid every other Friday unless adjusted for a holiday."
+      },
+      {
+        "condition_text": "timesheet is submitted late or approved after cutoff",
+        "action_text": "Payment may move to the next payroll cycle unless payroll approves an exception.",
+        "exception_text": "Payroll manager may approve urgent off-cycle correction.",
+        "consequence_text": "Delayed approval can delay payment.",
+        "source_quote": "Late hourly approvals may shift payment to the next payroll cycle."
+      },
+      {
+        "condition_text": "performing work under an active client engagement",
+        "action_text": "Charge time to the client project billable code.",
+        "exception_text": "If ownership is unclear, use suspense until finance confirms.",
+        "consequence_text": "Incorrect coding may require reclassification before invoicing.",
+        "source_quote": "Active client work must be charged to the billable project code."
+      },
+      {
+        "condition_text": "client ownership for work performed is unclear",
+        "action_text": "Use the suspense code until finance confirms the correct billing destination.",
+        "exception_text": "If finance confirms before payroll close, reclassify before lock.",
+        "consequence_text": "Unresolved suspense usage may delay invoicing.",
+        "source_quote": "Ambiguous work should be charged temporarily to suspense."
+      },
+      {
+        "condition_text": "creating internal brand assets, social posts, brochures, recruiting materials, or event promotion",
+        "action_text": "Charge time to internal marketing overhead.",
+        "exception_text": "If the work is directly tied to a client-funded campaign, use the client campaign code instead.",
+        "consequence_text": "Incorrect allocation may require labor reclass after review.",
+        "source_quote": "Internal brand and awareness work is charged to marketing overhead."
+      },
+      {
+        "condition_text": "running a client-specific campaign under contract",
+        "action_text": "Charge time and approved vendor costs to the client campaign code.",
+        "exception_text": "If no client code exists yet, use campaign suspense and notify finance.",
+        "consequence_text": "Missing codes can delay billing or reimbursement.",
+        "source_quote": "Client-funded campaigns use the client campaign code."
+      },
+      {
+        "condition_text": "boosted ads or paid media for internal company promotion",
+        "action_text": "Bill the spend to the internal marketing media budget.",
+        "exception_text": "Emergency event promotion under $250 may be approved retroactively within 1 business day.",
+        "consequence_text": "Unapproved spend may be rejected from reimbursement.",
+        "source_quote": "Internal paid media requires marketing director approval."
+      },
+      {
+        "condition_text": "creating a proposal, pitch deck, or sales support asset for a prospective client",
+        "action_text": "Charge time to business development or pursuit code, not a billable client code.",
+        "exception_text": "If a signed agreement states pre-sales work is billable, finance may authorize a client code.",
+        "consequence_text": "Misclassification can distort margin reporting.",
+        "source_quote": "Pre-sales work generally uses business development codes."
+      },
+      {
+        "condition_text": "overtime is planned in advance",
+        "action_text": "Obtain supervisor approval before working overtime.",
+        "exception_text": "Emergency response work may be approved retroactively within 24 hours.",
+        "consequence_text": "Unapproved overtime may trigger manager review.",
+        "source_quote": "Planned overtime requires advance supervisor approval."
+      },
+      {
+        "condition_text": "weekend overtime is required",
+        "action_text": "Obtain department manager approval before weekend overtime is worked.",
+        "exception_text": "Emergency site restoration may be approved afterward within 24 hours.",
+        "consequence_text": "Repeated unapproved weekend overtime may escalate to operations leadership.",
+        "source_quote": "Weekend overtime for hourly field employees requires manager approval."
+      }
+    ]
+  },
+  {
+    "question": "How do I import CSV data into my Bitwarden vault?",
+    "error": "\"requested_fields\" must be a non-empty array of column names."
+  },
+  {
+    "question": "When setting up Bitwarden, how should I configure two-factor authentication?",
+    "attempt": 1,
+    "row_count": 0,
+    "used_relaxed_query": false,
+    "search_spec": {
+      "table": "policies_v2",
+      "filters": {
+        "policy_category": "security",
+        "status": "active"
+      },
+      "requested_fields": [
+        "topic",
+        "subtopic",
+        "condition_text",
+        "action_text",
+        "approval_required",
+        "approver",
+        "source_quote"
+      ],
+      "comparison": false,
+      "reasoning_note": "Filtered by 'security' category to find relevant policies for two-factor authentication setup, ensuring only active policies are considered."
+    },
+    "sql": "SELECT \"topic\", \"subtopic\", \"condition_text\", \"action_text\", \"approval_required\", \"approver\", \"source_quote\"\nFROM policies_v2\nWHERE \"policy_category\" = %s AND \"status\" = %s\nLIMIT 10",
+    "params": [
+      "security",
+      "active"
+    ],
+    "answer": "No policy found",
+    "rows": []
+  }
+]

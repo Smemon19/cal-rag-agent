@@ -1,0 +1,52 @@
+[
+  {
+    "question": "How do I install the Bitwarden browser extension?",
+    "error": "connection to server at \"34.26.79.251\", port 5432 failed: Operation timed out\n\tIs the server running on that host and accepting TCP/IP connections?\n",
+    "planner_output": null,
+    "sql": null,
+    "params": null,
+    "row_count": null,
+    "sample_rows": [],
+    "final_answer": null
+  },
+  {
+    "question": "How do I export passwords from Microsoft Edge and move them into Bitwarden?",
+    "error": "connection to server at \"34.26.79.251\", port 5432 failed: Operation timed out\n\tIs the server running on that host and accepting TCP/IP connections?\n",
+    "planner_output": null,
+    "sql": null,
+    "params": null,
+    "row_count": null,
+    "sample_rows": [],
+    "final_answer": null
+  },
+  {
+    "question": "What should I do if my Bitwarden verification email does not show up?",
+    "error": "connection to server at \"34.26.79.251\", port 5432 failed: Operation timed out\n\tIs the server running on that host and accepting TCP/IP connections?\n",
+    "planner_output": null,
+    "sql": null,
+    "params": null,
+    "row_count": null,
+    "sample_rows": [],
+    "final_answer": null
+  },
+  {
+    "question": "How do I import CSV data into my Bitwarden vault?",
+    "error": "connection to server at \"34.26.79.251\", port 5432 failed: Operation timed out\n\tIs the server running on that host and accepting TCP/IP connections?\n",
+    "planner_output": null,
+    "sql": null,
+    "params": null,
+    "row_count": null,
+    "sample_rows": [],
+    "final_answer": null
+  },
+  {
+    "question": "When setting up Bitwarden, how should I configure two-factor authentication?",
+    "error": "connection to server at \"34.26.79.251\", port 5432 failed: Operation timed out\n\tIs the server running on that host and accepting TCP/IP connections?\n",
+    "planner_output": null,
+    "sql": null,
+    "params": null,
+    "row_count": null,
+    "sample_rows": [],
+    "final_answer": null
+  }
+]

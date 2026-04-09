@@ -20,6 +20,11 @@ crawl4ai==0.3.73
 requests
 beautifulsoup4
 pytest
+psycopg2-binary
+PyYAML
+openai
+starlette
+uvicorn
 google-cloud-bigquery>=3.10.0
 google-cloud-aiplatform
 google-auth>=2.20.0

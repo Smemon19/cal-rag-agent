@@ -1,0 +1,95 @@
+version: 1
+concepts:
+  policy_category:
+    type_hint: enum_like
+    synonyms: [category, policy type, domain]
+    reserved_names: [category_type]
+  topic:
+    type_hint: text
+    synonyms: [subject]
+    reserved_names: []
+  subtopic:
+    type_hint: text
+    synonyms: [sub section, sub-category]
+    reserved_names: []
+  applies_to:
+    type_hint: enum_like
+    synonyms: [scope, audience]
+    reserved_names: []
+  department:
+    type_hint: enum_like
+    synonyms: [team, business unit]
+    reserved_names: []
+  employee_type:
+    type_hint: enum_like
+    synonyms: [worker type]
+    reserved_names: []
+  activity_type:
+    type_hint: enum_like
+    synonyms: [work type, activity]
+    reserved_names: []
+  condition_text:
+    type_hint: text
+    synonyms: [condition]
+    reserved_names: []
+  action_text:
+    type_hint: text
+    synonyms: [required action, directive]
+    reserved_names: []
+  bill_to:
+    type_hint: enum_like
+    synonyms: [billing destination]
+    reserved_names: []
+  charge_code:
+    type_hint: enum_like
+    synonyms: [cost code, billing code]
+    reserved_names: []
+  is_billable:
+    type_hint: bool
+    synonyms: [billable]
+    reserved_names: []
+  approval_required:
+    type_hint: bool
+    synonyms: [needs approval]
+    reserved_names: []
+  approver:
+    type_hint: relationship
+    synonyms: [approving manager, approver role]
+    reserved_names: [approvers]
+  deadline_text:
+    type_hint: text
+    synonyms: [timing requirement, due by]
+    reserved_names: []
+  amount_threshold:
+    type_hint: numeric
+    synonyms: [threshold amount, cap amount, annual cap, yearly cap, annual limit]
+    reserved_names: [yearly_cap, annual_limit]
+  threshold_unit:
+    type_hint: enum_like
+    synonyms: [currency, units]
+    reserved_names: []
+  exception_text:
+    type_hint: relationship
+    synonyms: [exception, carve out]
+    reserved_names: [exceptions]
+  consequence_text:
+    type_hint: text
+    synonyms: [penalty, consequence]
+    reserved_names: []
+  source_quote:
+    type_hint: text
+    synonyms: [citation, quote]
+    reserved_names: []
+  status:
+    type_hint: enum_like
+    synonyms: [state]
+    reserved_names: []
+
+mapping_rules:
+  annual_cap: amount_threshold
+  yearly_cap: amount_threshold
+  annual_limit: amount_threshold
+  receipt_required: approval_required
+  multiple_approvers: approver
+  exceptions: exception_text
+

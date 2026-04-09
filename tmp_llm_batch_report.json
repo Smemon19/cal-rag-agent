@@ -1,0 +1,463 @@
+{
+  "latest_batch": "bat_a6143a4057754eb480f58c933e2424b1",
+  "previous_non_llm_batch": "bat_0e444541dc2a4fcc8d6b211547c34853",
+  "comparison": {
+    "bat_a6143a4057754eb480f58c933e2424b1": {
+      "stats": {
+        "chunks": 83,
+        "published": 14,
+        "skipped": 69,
+        "failed": 0
+      },
+      "quality": {
+        "avg_summary_len": "130.4285714285714286",
+        "avg_condition_len": "39.6428571428571429",
+        "avg_action_len": "75.0000000000000000",
+        "avg_quote_len": "169.1428571428571429",
+        "noisy_quote_count": 1
+      }
+    },
+    "bat_0e444541dc2a4fcc8d6b211547c34853": {
+      "stats": {
+        "chunks": 83,
+        "published": 19,
+        "skipped": 64,
+        "failed": 0
+      },
+      "quality": {
+        "avg_summary_len": "169.3157894736842105",
+        "avg_condition_len": "93.6315789473684211",
+        "avg_action_len": "1235.7368421052631579",
+        "avg_quote_len": "464.4736842105263158",
+        "noisy_quote_count": 6
+      }
+    }
+  },
+  "staged_sample_10": [
+    {
+      "extraction_id": "ext_c0e6a9edd2aa41fb80fe3125e4a1d9dd",
+      "section_id": "260",
+      "status": "skipped_non_publishable",
+      "confidence": 1.0,
+      "chunk_type": "transcript_metadata",
+      "summary": "This is a transcript.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "Transcript",
+      "reason_if_not_publishable": "The chunk only indicates that the document is a transcript and contains no durable guidance.",
+      "mapped_fields_json": {}
+    },
+    {
+      "extraction_id": "ext_a8afdda36ec643548575f20797fb903e",
+      "section_id": "261",
+      "status": "skipped_non_publishable",
+      "confidence": 1.0,
+      "chunk_type": "transcript_metadata",
+      "summary": "The transcript was recorded on April 18, 2025, at 4:01 PM.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "April 18, 2025, 4:01PM",
+      "reason_if_not_publishable": "Metadata is not generally publishable without context.",
+      "mapped_fields_json": {}
+    },
+    {
+      "extraction_id": "ext_a939aa7f49d04a46a234e3d0f1763e8a",
+      "section_id": "262",
+      "status": "skipped_non_publishable",
+      "confidence": 1.0,
+      "chunk_type": "transcript_metadata",
+      "summary": "Transcription started by Lisa Iverson.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [
+        "Lisa Iverson"
+      ],
+      "source_quote": "Lisa Iverson started transcription",
+      "reason_if_not_publishable": "Metadata about the transcription process.",
+      "mapped_fields_json": {}
+    },
+    {
+      "extraction_id": "ext_7e2b5f0b098345858f8eac9a65e5cd5d",
+      "section_id": "263",
+      "status": "skipped_non_publishable",
+      "confidence": 0.7,
+      "chunk_type": "discussion",
+      "summary": "The speaker introduces a lunch and learn session on setting up Bitwarden, covering account creation, browser extension installation, and password management.",
+      "topic": "Bitwarden Setup",
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [
+        "Bitwarden Microsoft Edge",
+        "Raymond Scott Nick",
+        "Bitwarden",
+        "Microsoft Edge"
+      ],
+      "source_quote": "Today, with a lesson in how to set up your bit warden and I've got a few housekeeping notes. This is this hour is general admin on your time sheets, not professional development.",
+      "reason_if_not_publishable": "Discussion and introductory remarks; lacks durable guidance.",
+      "mapped_fields_json": {
+        "topic": {
+          "value": "Bitwarden Setup",
+          "confidence": 0.7,
+          "provenance": "llm:topic"
+        }
+      }
+    },
+    {
+      "extraction_id": "ext_616c91a732394ec8ae15a3aaa2c809d0",
+      "section_id": "264",
+      "status": "skipped_non_publishable",
+      "confidence": 1.0,
+      "chunk_type": "filler",
+      "summary": "The speaker made a filler sound.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "Hmm.",
+      "reason_if_not_publishable": "Filler content without durable guidance.",
+      "mapped_fields_json": {}
+    },
+    {
+      "extraction_id": "ext_145e840527964c4da16e0de54da2c117",
+      "section_id": "265",
+      "status": "skipped_non_publishable",
+      "confidence": 0.7,
+      "chunk_type": "discussion",
+      "summary": "The speaker asks for confirmation from the audience about their experience with the password creation screen and receiving a link in their email.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "So if you are get can I just get a confirmation from people hands up if you're following along with me? Is this what you're getting as well?",
+      "reason_if_not_publishable": "This is a discussion and lacks durable guidance.",
+      "mapped_fields_json": {}
+    },
+    {
+      "extraction_id": "ext_3bdb3ae121694897aad0e00f21c0c961",
+      "section_id": "266",
+      "status": "skipped_non_publishable",
+      "confidence": 1.0,
+      "chunk_type": "filler",
+      "summary": "Affirmation.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "Yeah.",
+      "reason_if_not_publishable": "Filler content with no durable guidance.",
+      "mapped_fields_json": {}
+    },
+    {
+      "extraction_id": "ext_7bc5aa2ee33e402b898dc4240f864a6b",
+      "section_id": "267",
+      "status": "skipped_non_publishable",
+      "confidence": 0.9,
+      "chunk_type": "filler",
+      "summary": "Statement indicating the conclusion of a previous discussion.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "That's what I got.",
+      "reason_if_not_publishable": "Filler statement providing no actionable information.",
+      "mapped_fields_json": {}
+    },
+    {
+      "extraction_id": "ext_fbe277e7f4554c9685e294cace1269f6",
+      "section_id": "268",
+      "status": "skipped_non_publishable",
+      "confidence": 0.9,
+      "chunk_type": "discussion",
+      "summary": "The speaker discusses their Bitwarden account setup, password creation strategy using song lyrics, and demonstrates Bitwarden features like auto-fill and saving different types of information.",
+      "topic": "Bitwarden",
+      "subtopic": "Account Setup and Features",
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [
+        "Bitwarden Scott",
+        "Mobile Kim Heather",
+        "Bitwarden"
+      ],
+      "source_quote": "I am going to go to bitwarden and log in to my existing account",
+      "reason_if_not_publishable": "General discussion and demonstration, lacking specific durable guidance.",
+      "mapped_fields_json": {
+        "topic": {
+          "value": "Bitwarden",
+          "confidence": 0.9,
+          "provenance": "llm:topic"
+        },
+        "subtopic": {
+          "value": "Account Setup and Features",
+          "confidence": 0.9,
+          "provenance": "llm:subtopic"
+        }
+      }
+    },
+    {
+      "extraction_id": "ext_ee01bb3817d3433fa62062d551f1471c",
+      "section_id": "269",
+      "status": "skipped_non_publishable",
+      "confidence": 1.0,
+      "chunk_type": "filler",
+      "summary": "Utterance of 'Oh'.",
+      "topic": null,
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "Oh.",
+      "reason_if_not_publishable": "Filler word with no actionable content.",
+      "mapped_fields_json": {}
+    }
+  ],
+  "published_rows_all": [
+    {
+      "policy_id": "132",
+      "section_id": "271",
+      "chunk_type": "procedure",
+      "summary": "When setting up an account, users can choose to receive a verification code via email or an authenticator app.",
+      "topic": "Account Security",
+      "subtopic": "Two-Factor Authentication",
+      "condition_text": "When setting up an account",
+      "action_text": "Choose to receive verification code via email or an authenticator app",
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "I think when you set up your account, it asks to choose either from getting the code on e-mail or use an authenticator app.",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "133",
+      "section_id": "275",
+      "chunk_type": "procedure",
+      "summary": "Users can choose to receive notifications via email or the application.",
+      "topic": "Notifications",
+      "subtopic": null,
+      "condition_text": null,
+      "action_text": "Users can select email or the app to receive notifications.",
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "select either e-mail or the app itself",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "134",
+      "section_id": "276",
+      "chunk_type": "recommendation",
+      "summary": "Users should refresh their email if they are having trouble accessing their Bitwarden account, ensuring they use the email associated with the Bitwarden account.",
+      "topic": "Bitwarden",
+      "subtopic": "Account Access",
+      "condition_text": "If users have trouble accessing Bitwarden, or their login information is defaulting to an incorrect email address.",
+      "action_text": null,
+      "recommendation_text": "Refresh your email and verify it is the email address associated with your Bitwarden account. Store login information within Bitwarden rather than the Edge browser.",
+      "entities": [
+        "Bitwarden Edge Azure",
+        "Raymond Global Zira",
+        "Bitwarden"
+      ],
+      "source_quote": "I would suggest maybe refreshing your e-mail clay. And see if it comes in. It's got to be whatever e-mail you use to create your bitwarden account.",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "135",
+      "section_id": "278",
+      "chunk_type": "procedure",
+      "summary": "To install the Bitwarden browser extension, navigate to the download link in the help document and click the button to add the extension to your browser.",
+      "topic": "Bitwarden",
+      "subtopic": "Browser Extension Installation",
+      "condition_text": null,
+      "action_text": "Navigate to the download link in the help document and click the button to add the extension to your browser.",
+      "recommendation_text": null,
+      "entities": [
+        "Bitwarden Edge",
+        "Bitwarden"
+      ],
+      "source_quote": "click on this downloading button. And it takes you to the bitwarden screen where you can download it so. We have Edge browser download now is right here",
+      "confidence": 0.8
+    },
+    {
+      "policy_id": "136",
+      "section_id": "284",
+      "chunk_type": "procedure",
+      "summary": "To update a password on a website using Bitwarden, navigate to the account settings on the website, generate a new, strong password using Bitwarden's password generator (setting parameters for length, character types, an...",
+      "topic": "Password Management",
+      "subtopic": "Updating Passwords with Bitwarden",
+      "condition_text": "User wants to update a password on a website and use Bitwarden to generate a strong password.",
+      "action_text": "Navigate to the website's account settings, use Bitwarden to generate a new password, copy and paste the new password into the website.",
+      "recommendation_text": null,
+      "entities": [
+        "Bitwarden Shutterfly Edge",
+        "Bitwarden"
+      ],
+      "source_quote": "navigate to my accounts and settings. Where I can change my password? And I'm going to generate a stronger password. So first I'm going to fill in the password that I already have and now. What Scott's document walks me through is generating. A safer password I can do that from this app",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "137",
+      "section_id": "289",
+      "chunk_type": "procedure",
+      "summary": "To add information to Bitwarden, click the 'new' button and select the appropriate type of entry (login, card, identity, or note).",
+      "topic": "Bitwarden",
+      "subtopic": "Data Entry",
+      "condition_text": null,
+      "action_text": "Click the 'new' button, select the entry type, input information, and save. Folders can be created to organize information.",
+      "recommendation_text": null,
+      "entities": [
+        "Bitwarden"
+      ],
+      "source_quote": "OK. Yeah, it must not have. I'm not sure what I did here. Let's do that. OK. I added the number one at the end, it let me change the password. I do get this pop up. Do you want to update this password in bitwarden? I absolutely do because I'm not sure what's in there right now. So now it says that I'm updated, so I should now have an updated password that BITWARDEN has generated and deemed safer than the one that I had. And so because I use that button, I saved it so. Sorry that I got lost in my presentation. In there, I apologize for that. I haven't. I'm getting used to going back and forth f",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "138",
+      "section_id": "292",
+      "chunk_type": "faq",
+      "summary": "When logging into Ajera, the system requests an authenticator key after entering credentials.",
+      "topic": "IT Support",
+      "subtopic": "Account Access",
+      "condition_text": "After entering Ajera login credentials, the system prompts for an authenticator key.",
+      "action_text": null,
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "once you start to put like say I'm putting ajera into my you know login and it's asking you know once you fill in all the credentials it it then goes to authenticator key",
+      "confidence": 0.8
+    },
+    {
+      "policy_id": "139",
+      "section_id": "299",
+      "chunk_type": "procedure",
+      "summary": "When logging into a site requiring an authenticator key, a pop-up will appear, similar to Bitwarden, allowing you to use the saved key.",
+      "topic": "Authentication",
+      "subtopic": "Authenticator Key",
+      "condition_text": "When logging into a site requiring an authenticator key",
+      "action_text": "A pop-up will appear, similar to Bitwarden, allowing you to use the saved key.",
+      "recommendation_text": null,
+      "entities": [
+        "Bitwarden"
+      ],
+      "source_quote": "if you ever log in into a site where you need the authenticator key, you should. I'm assuming get that pop up like you do with the bitwarden password",
+      "confidence": 0.8
+    },
+    {
+      "policy_id": "140",
+      "section_id": "303",
+      "chunk_type": "procedure",
+      "summary": "To export passwords from Microsoft Edge and import them into Bitwarden, access the Edge wallet settings app.",
+      "topic": "Password Management",
+      "subtopic": "Exporting Passwords",
+      "condition_text": "Passwords are saved in Microsoft Edge",
+      "action_text": "Access the Edge wallet settings app to export passwords and import them into Bitwarden.",
+      "recommendation_text": null,
+      "entities": [
+        "Microsoft Edge Bitwarden",
+        "Bitwarden",
+        "Microsoft Edge"
+      ],
+      "source_quote": "export our passwords that are in Microsoft Edge and import them into bitwarden",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "141",
+      "section_id": "308",
+      "chunk_type": "procedure",
+      "summary": "Export passwords from Microsoft Edge to import into Bitwarden by navigating to edge://settings/passwords, exporting passwords to a file, and saving the file in a secure location.",
+      "topic": "Password Management",
+      "subtopic": "Password Export",
+      "condition_text": null,
+      "action_text": "Export passwords from Microsoft Edge and save the exported file in a secure location for importing into Bitwarden.",
+      "recommendation_text": null,
+      "entities": [
+        "Microsoft Edge Bitwarden",
+        "Bitwarden",
+        "Microsoft Edge"
+      ],
+      "source_quote": "So we're out to continue using Microsoft Edge. I could, you know, potentially import passwords from bitwarden. That's not what I want to do. I want to get them out of edge. And intibitwarden. So I am going to export my passwords.",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "142",
+      "section_id": "315",
+      "chunk_type": "procedure",
+      "summary": "To change emails, export your vault from settings using the browser extension, then import the exported CSV file into your personal email vault.",
+      "topic": "Account Management",
+      "subtopic": "Email Migration",
+      "condition_text": "When changing emails and using the browser extension",
+      "action_text": "Export the vault to a CSV file and import into the new account.",
+      "recommendation_text": null,
+      "entities": [
+        "Vault Bitwarden",
+        "Bitwarden"
+      ],
+      "source_quote": "export it from here and then you can import the file you exported on your personal e-mail",
+      "confidence": 0.9
+    },
+    {
+      "policy_id": "143",
+      "section_id": "318",
+      "chunk_type": "procedure",
+      "summary": "To import data to a vault, navigate to tools, then import data from the vault, selecting a destination folder and the correct file format (CSV).",
+      "topic": "Data Import",
+      "subtopic": "Vault Management",
+      "condition_text": null,
+      "action_text": "Navigate to tools, then import data from the vault, selecting a destination folder and the correct file format (CSV).",
+      "recommendation_text": null,
+      "entities": [
+        "CSV"
+      ],
+      "source_quote": "tools import data. That's what it tells me to do from vault.",
+      "confidence": 0.8
+    },
+    {
+      "policy_id": "144",
+      "section_id": "319",
+      "chunk_type": "procedure",
+      "summary": "CSV exports from Excel should work.",
+      "topic": "Data Export",
+      "subtopic": "File Formats",
+      "condition_text": "If exporting an Excel file as CSV",
+      "action_text": "the export should be functional",
+      "recommendation_text": null,
+      "entities": [
+        "CSV"
+      ],
+      "source_quote": "You exported in Excel file which is CSV, so that should work for you.",
+      "confidence": 0.8
+    },
+    {
+      "policy_id": "145",
+      "section_id": "321",
+      "chunk_type": "policy_rule",
+      "summary": "Users can choose the export format when transferring data from corporate email to personal email, but must ensure the formats are compatible.",
+      "topic": "Data Transfer",
+      "subtopic": "Email",
+      "condition_text": "When transferring data from corporate email to personal email",
+      "action_text": "Users can choose the export format but must ensure compatibility.",
+      "recommendation_text": null,
+      "entities": [],
+      "source_quote": "you can choose what you export with. Pid wad and like when you are transferring from the corporate e-mail to your personal e-mail. But you have to make sure it's the same format",
+      "confidence": 0.9
+    }
+  ]
+}

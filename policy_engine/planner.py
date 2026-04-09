@@ -20,6 +20,8 @@ ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
         "policy_category",
         "topic",
         "subtopic",
+        "document_id",
+        "batch_id",
         "applies_to",
         "department",
         "employee_type",
@@ -29,11 +31,18 @@ ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
         "approval_required",
         "approver",
         "status",
+        "receipt_required",
+        "annual_cap",
+        "region_code",
+        "approval_frequency",
     }
 )
 
 ALLOWED_REQUESTED_FIELDS: frozenset[str] = frozenset(
     {
+        "document_id",
+        "batch_id",
+        "summary",
         "policy_category",
         "topic",
         "subtopic",
@@ -55,6 +64,12 @@ ALLOWED_REQUESTED_FIELDS: frozenset[str] = frozenset(
         "consequence_text",
         "source_quote",
         "status",
+        "receipt_required",
+        "annual_cap",
+        "region_code",
+        "approval_frequency",
+        "policy_precedence",
+        "override_policy_id",
     }
 )
 
@@ -63,7 +78,9 @@ Table: policies_v2
 
 Columns (for planning retrieved fields and filters):
 - policy_id, section_id  — row identifiers (do not request in requested_fields for this app; use other columns)
+- document_id, batch_id  — optional retrieval scope for a specific ingestion document/batch
 - policy_category   — high-level bucket (e.g. payroll, billing, marketing, travel, overtime)
+- summary           — normalized semantic summary (from adaptive staging when available)
 - topic, subtopic
 - applies_to, department, employee_type
 - activity_type     — more specific work type (e.g. internal marketing, client campaign, overtime)
@@ -209,7 +226,7 @@ def validate_and_normalize_search_spec(raw: dict[str, Any]) -> dict[str, Any]:
 
     rf = raw.get("requested_fields")
     if not isinstance(rf, list) or not rf:
-        raise ValueError('"requested_fields" must be a non-empty array of column names.')
+        rf = ["topic", "subtopic", "summary", "condition_text", "action_text", "source_quote"]
 
     requested_fields: list[str] = []
     for col in rf:
@@ -217,9 +234,12 @@ def validate_and_normalize_search_spec(raw: dict[str, Any]) -> dict[str, Any]:
             raise ValueError("requested_fields entries must be non-empty strings.")
         c = col.strip()
         if c not in ALLOWED_REQUESTED_FIELDS:
-            raise ValueError(f'Unknown requested field "{c}". Not in allowlist.')
+            continue
         if c not in requested_fields:
             requested_fields.append(c)
+
+    if not requested_fields:
+        requested_fields = ["topic", "subtopic", "summary", "condition_text", "action_text", "source_quote"]
 
     if "source_quote" not in requested_fields:
         requested_fields.append("source_quote")

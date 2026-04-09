@@ -50,4 +50,16 @@ Instructions:
         ],
         temperature=0.2,
     )
-    return (response.choices[0].message.content or "").strip()
+    text = (response.choices[0].message.content or "").strip()
+    if rows and text.lower() == "no policy found":
+        snippets = []
+        for r in rows[:3]:
+            topic = r.get("topic") or r.get("subtopic") or "policy"
+            cond = r.get("condition_text") or ""
+            act = r.get("action_text") or ""
+            quote = r.get("source_quote") or ""
+            summary = " ".join(x for x in [str(topic), str(cond), str(act)] if x).strip()
+            snippets.append(summary or str(quote))
+        joined = "; ".join(s for s in snippets if s)
+        return joined[:700] if joined else "No policy found"
+    return text

@@ -25,9 +25,18 @@ from starlette.requests import Request
 from starlette.responses import FileResponse, JSONResponse
 from starlette.routing import Route
 
+from adaptive_ingestion.pipeline import AdaptiveIngestionPipeline, IngestionDocumentInput
 from policy_engine.service import answer_policy_question
 
 _WEB_DIR = Path(__file__).resolve().parent / "web"
+_PIPELINE: AdaptiveIngestionPipeline | None = None
+
+
+def _get_pipeline() -> AdaptiveIngestionPipeline:
+    global _PIPELINE
+    if _PIPELINE is None:
+        _PIPELINE = AdaptiveIngestionPipeline()
+    return _PIPELINE
 
 
 async def homepage(_request: Request) -> FileResponse:
@@ -53,11 +62,57 @@ async def ask(request: Request) -> JSONResponse:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+async def ingest_batch(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Expected JSON body."}, status_code=400)
+    docs_raw = body.get("documents") or []
+    if not isinstance(docs_raw, list) or not docs_raw:
+        return JSONResponse({"error": "documents[] is required"}, status_code=400)
+    triggered_by = str(body.get("triggered_by") or "api")
+    pipeline = _get_pipeline()
+    batch_id = pipeline.create_batch(triggered_by=triggered_by, trigger_source="api")
+    docs = [
+        IngestionDocumentInput(
+            source_uri=str(d.get("source_uri") or ""),
+            content=str(d.get("content") or ""),
+            title=d.get("title"),
+            doc_type=d.get("doc_type"),
+            version=d.get("version"),
+        )
+        for d in docs_raw
+    ]
+    result = pipeline.run_batch(batch_id=batch_id, documents=docs)
+    proposals = pipeline.plan_schema_changes(batch_id=batch_id)
+    return JSONResponse({"batch": result, "proposals": proposals})
+
+
+async def apply_migrations(_request: Request) -> JSONResponse:
+    migration_ids = _get_pipeline().apply_approved_migrations(applied_by="web_server")
+    return JSONResponse({"migration_ids": migration_ids})
+
+
+async def publish_batch(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Expected JSON body with batch_id."}, status_code=400)
+    batch_id = str(body.get("batch_id") or "").strip()
+    if not batch_id:
+        return JSONResponse({"error": "batch_id is required"}, status_code=400)
+    result = _get_pipeline().replay_and_publish(batch_id=batch_id)
+    return JSONResponse(result)
+
+
 app = Starlette(
     debug=False,
     routes=[
         Route("/", homepage, methods=["GET"]),
         Route("/ask", ask, methods=["POST"]),
+        Route("/ingest_batch", ingest_batch, methods=["POST"]),
+        Route("/apply_migrations", apply_migrations, methods=["POST"]),
+        Route("/publish_batch", publish_batch, methods=["POST"]),
     ],
 )
 
