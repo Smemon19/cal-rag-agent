@@ -134,6 +134,8 @@ RULE 7 — TOPIC GUIDANCE (what each major topic covers):
 Use these mappings to pick the right topic even when the question wording doesn't directly match the topic name:
 - "Time Tracking": covers ALL timesheet rules — submission deadlines, who can fill out timesheets, daily entry
   requirements, billable vs overhead categories, social event charging restrictions, general timekeeping policy.
+  IMPORTANT: questions about charging time at holiday parties, company events, tradeshows, or social gatherings
+  belong here (subtopic "Social Events"), NOT under "Holidays" or "Marketing".
 - "General Administration": covers internal admin duties AND rules about training other employees, onboarding,
   HR activities, IT, payroll, company equipment, team management.
 - "Business Development": covers pre-proposal client meetings, go/no-go decisions, market research, cold calls.
@@ -141,7 +143,8 @@ Use these mappings to pick the right topic even when the question wording doesn'
   Note: if a question is about LEADING training for others, check "General Administration" — that is where
   the rule about training others lives, NOT Professional Development.
 - "Marketing": covers unallowable promotional time, tradeshows, advertising, social event logistics.
-- "Holidays": covers company holiday schedule, holiday time usage and carryover rules.
+- "Holidays": covers company holiday schedule, holiday time usage and carryover rules — NOT how to charge
+  time at holiday parties (that is "Time Tracking").
 - "Paid Time Off": covers PTO accrual, advance usage, request procedures, unscheduled absences.
 - "Bid/Proposal": covers bid and proposal work, Ajera activity codes, RFQ/RFP preparation.
 - "Billable Time": covers direct project labor charging rules.

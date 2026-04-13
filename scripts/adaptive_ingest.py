@@ -103,8 +103,21 @@ def main() -> None:
     for p in args.paths:
         path = Path(p)
         content = ""
-        if path.suffix.lower() != ".pdf":
-            content = path.read_text(encoding="utf-8")
+        suffix = path.suffix.lower()
+        if suffix == ".docx":
+            try:
+                import docx as _docx
+                doc = _docx.Document(str(path))
+                content = "\n".join(para.text for para in doc.paragraphs if para.text.strip())
+            except Exception as e:
+                print(f"[warn] Could not read {path.name} as docx: {e} — skipping")
+                continue
+        elif suffix != ".pdf":
+            try:
+                content = path.read_text(encoding="utf-8")
+            except Exception as e:
+                print(f"[warn] Could not read {path.name}: {e} — skipping")
+                continue
         docs.append(
             IngestionDocumentInput(
                 source_uri=f"file://{path.resolve()}",
