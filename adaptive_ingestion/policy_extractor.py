@@ -173,10 +173,19 @@ Schema:
 }}
 
 Rules:
-- Prefer publishable=false for metadata/filler/discussion without durable guidance.
+- Mark publishable=false ONLY for true filler (greetings, timestamps, single-word responses) or transcript_metadata.
+- Policy documents contain durable guidance — discussion, recommendation, procedure, and policy_rule chunks from policy documents should generally be publishable=true if they contain any actionable or informational content.
 - Publishable procedure/recommendation is allowed even if condition_text is null, as long as action/summary is clear.
 - Keep entities strict (people, products, orgs); exclude filler tokens like So, All, That.
 - source_quote must be directly copied from chunk text.
+
+CRITICAL — CROSS-REFERENCE RULE:
+If this chunk mentions that a DIFFERENT category or policy area applies to a specific situation
+(e.g. "for X situation, use Y category instead" or "this time should be charged to Z"),
+set the topic to reflect the REFERENCED category (Y or Z), not the section heading this chunk came from.
+Example: A note inside a "Professional Development" section that says "if you are leading training,
+your time is General Administration" should produce topic="General Administration", not topic="Professional Development".
+The topic must reflect what the rule IS ABOUT, not where it physically appears in the document.
 
 Chunk text:
 \"\"\"{normalized_text}\"\"\"
@@ -410,15 +419,15 @@ Chunk text:
 
         semantic_types = {"policy_rule", "procedure", "recommendation", "definition", "faq", "action_item"}
         has_structure = bool(topic or subtopic or condition_text or action_text or recommendation_text)
-        publishable = chunk_type in semantic_types and confidence >= 0.62 and has_structure
+        publishable = chunk_type in semantic_types and confidence >= 0.50 and has_structure
         # Relaxed gate: strong instructional chunks can publish with slightly weaker structure.
-        if not publishable and chunk_type in {"procedure", "recommendation"} and instruction_signal and confidence >= 0.6:
+        if not publishable and chunk_type in {"procedure", "recommendation"} and instruction_signal and confidence >= 0.48:
             publishable = True
         reason_if_not_publishable = None
         if not publishable:
             if chunk_type not in semantic_types:
                 reason_if_not_publishable = f"chunk_type={chunk_type} is non-publishable"
-            elif confidence < 0.62:
+            elif confidence < 0.50:
                 reason_if_not_publishable = f"low confidence ({confidence:.2f})"
             elif not has_structure:
                 reason_if_not_publishable = "insufficient structured signal"

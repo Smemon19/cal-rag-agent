@@ -12,7 +12,7 @@ from typing import Any
 
 from policy_engine.planner import ALLOWED_FILTER_KEYS, ALLOWED_REQUESTED_FIELDS
 
-DEFAULT_LIMIT = 10
+DEFAULT_LIMIT = 20
 
 FIELD_SQL_MAP: dict[str, str] = {
     "document_id": "COALESCE(s.document_id::text, d.document_id::text)",
@@ -91,26 +91,44 @@ def build_query_from_spec(search_spec: dict) -> tuple[str, tuple[Any, ...]]:
         val = filters[col]
         expr = _filter_expr(col)
 
+        # topic and subtopic use case-insensitive matching so planner
+        # capitalisation differences don't cause zero-row misses.
+        case_insensitive = col in {"topic", "subtopic"}
+
         if isinstance(val, list):
             if not val:
                 continue
             if col == "policy_category":
                 clauses.append(f"({expr} = ANY(%s) OR {expr} IS NULL)")
+                params.append(val)
+            elif case_insensitive:
+                clauses.append(f"LOWER({expr}) = ANY(%s)")
+                params.append([v.lower() for v in val])
             else:
                 clauses.append(f"{expr} = ANY(%s)")
-            params.append(val)
+                params.append(val)
         else:
             if col == "policy_category":
                 clauses.append(f"({expr} = %s OR {expr} IS NULL)")
+                params.append(val)
+            elif case_insensitive:
+                clauses.append(f"LOWER({expr}) = LOWER(%s)")
+                params.append(val)
             else:
                 clauses.append(f"{expr} = %s")
-            params.append(val)
+                params.append(val)
 
     where_sql = " AND ".join(clauses) if clauses else "TRUE"
     sql = (
         f"SELECT {select_clause}\n"
         f"{BASE_FROM_SQL.strip()}\n"
         f"WHERE {where_sql}\n"
+        f"ORDER BY\n"
+        f"  (CASE WHEN p.action_text IS NOT NULL AND p.condition_text IS NOT NULL THEN 0\n"
+        f"        WHEN p.action_text IS NOT NULL THEN 1\n"
+        f"        WHEN p.condition_text IS NOT NULL THEN 2\n"
+        f"        ELSE 3 END),\n"
+        f"  p.policy_id\n"
         f"LIMIT {int(DEFAULT_LIMIT)}"
     )
     return sql, tuple(params)

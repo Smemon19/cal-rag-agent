@@ -76,57 +76,84 @@ ALLOWED_REQUESTED_FIELDS: frozenset[str] = frozenset(
 SCHEMA_CONTEXT = """
 Table: policies_v2
 
-Columns (for planning retrieved fields and filters):
-- policy_id, section_id  — row identifiers (do not request in requested_fields for this app; use other columns)
-- document_id, batch_id  — optional retrieval scope for a specific ingestion document/batch
-- policy_category   — high-level bucket (e.g. payroll, billing, marketing, travel, overtime)
-- summary           — normalized semantic summary (from adaptive staging when available)
-- topic, subtopic
-- applies_to, department, employee_type
-- activity_type     — more specific work type (e.g. internal marketing, client campaign, overtime)
-- condition_text
-- action_text
-- bill_to           — where time/cost should be charged
-- charge_code       — billing or overhead code
-- is_billable
-- approval_required, approver
-- deadline_text
-- amount_threshold, threshold_unit
-- exception_text, consequence_text
-- source_quote
-- status            — should usually be 'active' for current policy
-
-Meanings for the planner:
-- policy_category is the high-level bucket.
-- activity_type is the more specific activity/work type.
-- bill_to is the charging destination; charge_code is the code to use.
-- Prefer status = 'active' unless the user clearly asks for inactive/archived policy.
+Key columns:
+- topic, subtopic       — THE primary filter columns. Always filter on these first.
+- condition_text        — the "if/when" part of a policy rule
+- action_text           — the "then/must do" part of a policy rule
+- source_quote          — the verbatim text from the original document (always include this)
+- summary               — a short plain-English summary of the row
+- policy_category       — high-level bucket (e.g. payroll, billing, travel). Often NULL — only filter if it appears in the snapshot.
+- applies_to, department, employee_type — who the policy applies to
+- activity_type         — specific work type. Often NULL — only filter if it appears in the snapshot.
+- bill_to, charge_code, is_billable — billing/charging info
+- approval_required, approver — approval rules
+- deadline_text, amount_threshold, threshold_unit — deadlines and limits
+- exception_text, consequence_text — exceptions and consequences
+- status                — always filter on 'active' unless told otherwise
 """
 
 
-PLANNER_SYSTEM = f"""You are a database search planner for an internal policy system.
+PLANNER_SYSTEM = f"""You are a search planner for an internal policy database. Your ONLY job is to output a JSON search spec. Do NOT answer the question. Do NOT write SQL.
 
 {SCHEMA_CONTEXT}
 
-Your job:
-- Read the user's question and propose a structured JSON search specification for table {ALLOWED_TABLE}.
-- Do NOT answer the question or explain policy outcomes.
-- Do NOT write SQL.
-- Use only the schema above. If unsure about a filter value, omit that filter rather than guessing.
-- Prefer broader but relevant filters over overly narrow ones that may return zero rows.
-- For comparison questions (e.g. A vs B), set "comparison": true and use arrays in filters when multiple values apply
-  (e.g. "activity_type": ["internal marketing", "client campaign"] or multiple categories if needed).
-- Always include "status": "active" in filters unless there is a strong reason not to.
-- Include enough requested_fields to support the user's question: billing/charge/approvals/exceptions/deadlines as relevant.
-- Return JSON only (no markdown, no prose outside JSON).
+=== HARD RULES — FOLLOW EXACTLY ===
 
-Required JSON shape:
+RULE 1 — USE ONLY REAL TOPIC VALUES:
+A DB Snapshot will be given to you showing every topic and subtopic currently in the database.
+You MUST select topic and subtopic filter values ONLY from that exact list. Copy them verbatim, matching case exactly.
+Never invent, paraphrase, or guess a topic that is not in the snapshot.
+If multiple topics from the list are relevant, include all of them as an array — this is always better than picking just one.
+If no topic perfectly matches, pick the closest one(s) from the list — do not leave the topic filter empty.
+
+RULE 2 — OTHER FILTER VALUES:
+Every other filter value (policy_category, activity_type, department, etc.) must also appear verbatim in the DB Snapshot.
+If a value you want is not in the snapshot, omit that filter entirely.
+
+RULE 3 — PREFER BROAD OVER NARROW:
+Returning too many rows is better than returning zero rows.
+When in doubt, include more topics in an array rather than picking just one.
+If a question is about a broad area (e.g. timesheets, time tracking, PTO, holidays, expenses), always include
+ALL related topics from the snapshot as an array — never bet on just one topic for broad questions.
+
+RULE 4 — ALWAYS INCLUDE:
+- "status": "active" in filters
+- "source_quote" in requested_fields
+
+RULE 5 — COMPARISON QUESTIONS:
+If the question compares two things (A vs B), set "comparison": true and use arrays to capture both sides.
+
+RULE 6 — SPECIFIC VS BROAD QUESTIONS:
+- For SPECIFIC questions (a deadline, a yes/no rule, a single procedure): pick the single most relevant topic
+  and add a subtopic filter if one from the snapshot clearly matches.
+- For BROAD or COMPARISON questions (differences between two things, overview of a policy area): use an array.
+- When unsure, prefer the topic with the MOST rows in the snapshot — a larger topic is more likely to contain
+  the answer than a small single-row topic.
+
+RULE 7 — TOPIC GUIDANCE (what each major topic covers):
+Use these mappings to pick the right topic even when the question wording doesn't directly match the topic name:
+- "Time Tracking": covers ALL timesheet rules — submission deadlines, who can fill out timesheets, daily entry
+  requirements, billable vs overhead categories, social event charging restrictions, general timekeeping policy.
+- "General Administration": covers internal admin duties AND rules about training other employees, onboarding,
+  HR activities, IT, payroll, company equipment, team management.
+- "Business Development": covers pre-proposal client meetings, go/no-go decisions, market research, cold calls.
+- "Professional Development": covers approved training for the employee's own skills, continuing education.
+  Note: if a question is about LEADING training for others, check "General Administration" — that is where
+  the rule about training others lives, NOT Professional Development.
+- "Marketing": covers unallowable promotional time, tradeshows, advertising, social event logistics.
+- "Holidays": covers company holiday schedule, holiday time usage and carryover rules.
+- "Paid Time Off": covers PTO accrual, advance usage, request procedures, unscheduled absences.
+- "Bid/Proposal": covers bid and proposal work, Ajera activity codes, RFQ/RFP preparation.
+- "Billable Time": covers direct project labor charging rules.
+
+=== OUTPUT FORMAT ===
+Return JSON only — no markdown, no explanation outside JSON.
 {{
   "table": "policies_v2",
-  "filters": {{ "...": "scalar or array of strings/booleans as appropriate" }},
-  "requested_fields": ["column names to SELECT"],
+  "filters": {{ "topic": "...", "status": "active" }},
+  "requested_fields": ["topic", "subtopic", "condition_text", "action_text", "source_quote"],
   "comparison": false,
-  "reasoning_note": "brief note on filter choices (not an answer to the user)"
+  "reasoning_note": "which topics you picked and why"
 }}
 """
 
@@ -239,10 +266,12 @@ def validate_and_normalize_search_spec(raw: dict[str, Any]) -> dict[str, Any]:
             requested_fields.append(c)
 
     if not requested_fields:
-        requested_fields = ["topic", "subtopic", "summary", "condition_text", "action_text", "source_quote"]
+        requested_fields = ["topic", "subtopic", "condition_text", "action_text", "source_quote"]
 
-    if "source_quote" not in requested_fields:
-        requested_fields.append("source_quote")
+    # Always include the three core content fields — the formatter needs them to answer accurately.
+    for required in ("condition_text", "action_text", "source_quote"):
+        if required not in requested_fields:
+            requested_fields.append(required)
 
     comparison = raw.get("comparison", False)
     if not isinstance(comparison, bool):
@@ -261,26 +290,109 @@ def validate_and_normalize_search_spec(raw: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def plan_search(question: str) -> dict[str, Any]:
+def fetch_db_context() -> str:
+    """
+    Query the live database for distinct values in key filterable columns.
+    Returns a formatted string to inject into the planner prompt so it
+    filters on values that actually exist, not guessed ones.
+    Returns an empty string if the DB is unreachable or empty.
+    """
+    try:
+        from policy_engine.db import run_query
+
+        count_rows = run_query("SELECT COUNT(*) AS n FROM policies_v2")
+        total = int((count_rows[0].get("n") or 0)) if count_rows else 0
+
+        if total == 0:
+            return "The policies_v2 table is currently empty — no rows have been published yet."
+
+        rows = run_query(
+            """
+            SELECT col, val FROM (
+                SELECT 'topic' AS col, topic AS val FROM policies_v2 WHERE topic IS NOT NULL AND topic != ''
+                UNION ALL
+                SELECT 'subtopic', subtopic FROM policies_v2 WHERE subtopic IS NOT NULL AND subtopic != ''
+                UNION ALL
+                SELECT 'policy_category', policy_category FROM policies_v2 WHERE policy_category IS NOT NULL AND policy_category != ''
+                UNION ALL
+                SELECT 'department', department FROM policies_v2 WHERE department IS NOT NULL AND department != ''
+                UNION ALL
+                SELECT 'employee_type', employee_type FROM policies_v2 WHERE employee_type IS NOT NULL AND employee_type != ''
+                UNION ALL
+                SELECT 'activity_type', activity_type FROM policies_v2 WHERE activity_type IS NOT NULL AND activity_type != ''
+                UNION ALL
+                SELECT 'status', status FROM policies_v2 WHERE status IS NOT NULL AND status != ''
+            ) t
+            GROUP BY col, val
+            ORDER BY col, val
+            LIMIT 300
+            """
+        )
+
+        by_col: dict[str, list[str]] = {}
+        for r in rows:
+            col = str(r.get("col") or "")
+            val = str(r.get("val") or "").strip()
+            if col and val:
+                by_col.setdefault(col, []).append(val)
+
+        lines = [f"Total rows in policies_v2: {total}", ""]
+        lines.append("=== TOPICS (use ONLY these exact values for topic filters) ===")
+        for val in sorted(by_col.get("topic", [])):
+            lines.append(f"  - {val}")
+
+        if by_col.get("subtopic"):
+            lines.append("")
+            lines.append("=== SUBTOPICS (use ONLY these exact values for subtopic filters) ===")
+            for val in sorted(by_col.get("subtopic", [])):
+                lines.append(f"  - {val}")
+
+        for col in ("policy_category", "department", "employee_type", "activity_type", "status"):
+            if by_col.get(col):
+                lines.append("")
+                lines.append(f"=== {col.upper()} values ===")
+                for val in sorted(by_col[col]):
+                    lines.append(f"  - {val}")
+
+        return "\n".join(lines)
+    except Exception:
+        return ""
+
+
+def plan_search(question: str, db_context: str = "") -> dict[str, Any]:
     """
     Call OpenAI (gpt-4o-mini) to produce a JSON search plan, then validate and normalize it.
     Raises ValueError on empty question or invalid planner output.
+    Pass db_context (from fetch_db_context()) to ground the planner in real DB values.
     """
     q = (question or "").strip()
     if not q:
         raise ValueError("Question is empty.")
 
+    if db_context:
+        system_prompt = (
+            PLANNER_SYSTEM
+            + f"\n\n=== DB SNAPSHOT — YOU MUST ONLY USE VALUES FROM THIS LIST ===\n"
+            f"{db_context}\n"
+            f"=== END OF DB SNAPSHOT ==="
+        )
+        user_content = (
+            f"REMINDER: You must pick topic/subtopic values ONLY from the DB Snapshot in the system prompt. "
+            f"Do not invent values that are not in the list.\n\n"
+            f"User question (plan retrieval only — do not answer it):\n{q}"
+        )
+    else:
+        system_prompt = PLANNER_SYSTEM
+        user_content = f"User question (plan retrieval only — do not answer it):\n{q}"
+
     client = OpenAI()
     response = client.chat.completions.create(
         model="gpt-4o-mini",
         response_format={"type": "json_object"},
-        temperature=0.1,
+        temperature=0.0,
         messages=[
-            {"role": "system", "content": PLANNER_SYSTEM},
-            {
-                "role": "user",
-                "content": f"User question (plan retrieval only; do not answer):\n{q}",
-            },
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_content},
         ],
     )
 

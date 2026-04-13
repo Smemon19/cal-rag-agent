@@ -7,14 +7,28 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from pathlib import Path
 from typing import Any
 
 from adaptive_ingestion.pipeline import AdaptiveIngestionPipeline, IngestionDocumentInput
 from policy_engine.db import run_query
 from policy_engine.formatter import format_answer
-from policy_engine.planner import plan_search
+from policy_engine.planner import fetch_db_context, plan_search
 from policy_engine.query_builder import build_query_from_spec, build_text_fallback_query, relaxed_specs_in_order
+
+# Cache the DB context so we don't hit the DB on every single question.
+_db_context_cache: str = ""
+_db_context_fetched_at: float = 0.0
+_DB_CONTEXT_TTL: float = 300.0  # refresh every 5 minutes
+
+
+def _get_db_context() -> str:
+    global _db_context_cache, _db_context_fetched_at
+    if time.time() - _db_context_fetched_at > _DB_CONTEXT_TTL:
+        _db_context_cache = fetch_db_context()
+        _db_context_fetched_at = time.time()
+    return _db_context_cache
 
 
 def _json_safe(obj: Any) -> Any:
@@ -91,7 +105,8 @@ def answer_policy_question(question: str, *, batch_id: str | None = None, docume
         raise ValueError("Question is empty.")
 
     # Step 1–2: planner validates/normalizes the spec internally.
-    search_spec = plan_search(q)
+    # Ground the planner in real DB values so it doesn't guess filter values.
+    search_spec = plan_search(q, db_context=_get_db_context())
     scope = _extract_scope_from_question(q)
     if batch_id:
         scope["batch_id"] = batch_id

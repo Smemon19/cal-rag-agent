@@ -60,10 +60,11 @@ class Publisher:
             or candidate.get("condition_text")
             or candidate.get("action_text")
             or candidate.get("recommendation_text")
+            or candidate.get("summary")
         )
         if not publishable:
             raise NonPublishableChunk(candidate.get("reason_if_not_publishable") or "chunk flagged non-publishable")
-        if confidence < 0.62:
+        if confidence < 0.50:
             raise NonPublishableChunk(f"confidence below threshold ({confidence:.2f})")
         if not has_structure:
             raise NonPublishableChunk("missing meaningful structured fields")
