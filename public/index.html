@@ -4,261 +4,610 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Policy Badger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #f5f5f5;
-      display: flex;
-      flex-direction: column;
-      height: 100vh;
-      color: #1a1a1a;
+    :root {
+      --navy:      #0f1729;
+      --navy-mid:  #1a2540;
+      --navy-soft: #243050;
+      --accent:    #4f8ef7;
+      --accent-dim:#3a6fd4;
+      --surface:   #f7f8fc;
+      --card:      #ffffff;
+      --border:    #e4e8f0;
+      --text:      #1c2333;
+      --muted:     #8892a4;
+      --tag-bg:    #eef2ff;
+      --tag-text:  #4f6ef5;
+      --error-bg:  #fff1f1;
+      --error:     #c0392b;
     }
 
-    header {
-      background: #1a1a2e;
-      color: #fff;
-      padding: 16px 24px;
+    html, body {
+      height: 100%;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background: var(--surface);
+      color: var(--text);
+    }
+
+    /* ── LAYOUT ─────────────────────────────── */
+    .shell {
+      display: flex;
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── SIDEBAR ─────────────────────────────── */
+    .sidebar {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--navy);
+      display: flex;
+      flex-direction: column;
+      padding: 28px 20px 24px;
+      gap: 32px;
+    }
+
+    .brand {
       display: flex;
       align-items: center;
       gap: 12px;
+    }
+
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #4f8ef7 0%, #7c5be6 100%);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 20px;
       flex-shrink: 0;
     }
 
-    header .badge {
-      font-size: 22px;
-    }
-
-    header h1 {
-      font-size: 18px;
+    .brand-text h1 {
+      font-size: 15px;
       font-weight: 600;
-      letter-spacing: 0.3px;
+      color: #fff;
+      letter-spacing: 0.2px;
     }
 
-    header p {
-      font-size: 13px;
-      color: #aaa;
+    .brand-text p {
+      font-size: 11.5px;
+      color: #6b7fa3;
       margin-top: 2px;
     }
 
+    .sidebar-section-label {
+      font-size: 10px;
+      font-weight: 600;
+      color: #4a5878;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 10px;
+    }
+
+    .suggestions {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .suggestion-btn {
+      background: var(--navy-mid);
+      border: 1px solid #243050;
+      border-radius: 8px;
+      color: #a8b8d8;
+      font-size: 12px;
+      font-family: inherit;
+      padding: 9px 12px;
+      text-align: left;
+      cursor: pointer;
+      line-height: 1.4;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+
+    .suggestion-btn:hover {
+      background: var(--navy-soft);
+      border-color: #364870;
+      color: #d0ddf5;
+    }
+
+    .sidebar-footer {
+      margin-top: auto;
+      font-size: 11px;
+      color: #3d4f6a;
+      line-height: 1.6;
+    }
+
+    /* ── MAIN CHAT AREA ──────────────────────── */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--surface);
+    }
+
+    /* ── TOPBAR ──────────────────────────────── */
+    .topbar {
+      flex-shrink: 0;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .topbar-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .status-dot {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      background: #22c55e;
+      border-radius: 50%;
+      animation: breathe 2.5s ease-in-out infinite;
+    }
+
+    @keyframes breathe {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* ── MESSAGES ────────────────────────────── */
     #chat {
       flex: 1;
       overflow-y: auto;
-      padding: 24px;
+      padding: 32px 28px;
       display: flex;
       flex-direction: column;
-      gap: 16px;
+      gap: 20px;
+      scroll-behavior: smooth;
     }
 
-    .message {
-      max-width: 720px;
-      width: fit-content;
-      padding: 12px 16px;
-      border-radius: 12px;
-      font-size: 14.5px;
-      line-height: 1.6;
-      white-space: pre-wrap;
-    }
+    #chat::-webkit-scrollbar { width: 5px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: #d0d7e6; border-radius: 10px; }
 
-    .message.user {
-      background: #1a1a2e;
-      color: #fff;
-      align-self: flex-end;
-      border-bottom-right-radius: 4px;
-    }
-
-    .message.bot {
-      background: #fff;
-      color: #1a1a1a;
-      align-self: flex-start;
-      border-bottom-left-radius: 4px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
-
-    .message.bot .meta {
-      font-size: 11px;
-      color: #999;
-      margin-top: 8px;
-    }
-
-    .message.error {
-      background: #fff0f0;
-      color: #c0392b;
-      align-self: flex-start;
-      border-bottom-left-radius: 4px;
-    }
-
-    .thinking {
-      background: #fff;
-      color: #999;
-      align-self: flex-start;
-      border-bottom-left-radius: 4px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-      padding: 12px 16px;
-      border-radius: 12px;
-      font-size: 14px;
-      font-style: italic;
-      animation: pulse 1.2s ease-in-out infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
+    /* Empty state */
     .empty-state {
       margin: auto;
       text-align: center;
-      color: #aaa;
+      max-width: 380px;
     }
 
-    .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
-    .empty-state p { font-size: 15px; }
-    .empty-state .hint { font-size: 13px; margin-top: 6px; color: #bbb; }
+    .empty-icon {
+      width: 64px;
+      height: 64px;
+      background: linear-gradient(135deg, #eef2ff 0%, #e5edff 100%);
+      border-radius: 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 30px;
+      margin: 0 auto 18px;
+    }
 
+    .empty-state h2 {
+      font-size: 17px;
+      font-weight: 600;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .empty-state p {
+      font-size: 13.5px;
+      color: var(--muted);
+      line-height: 1.6;
+    }
+
+    /* Message rows */
+    .message-row {
+      display: flex;
+      gap: 12px;
+      animation: fadeUp 0.2s ease both;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .message-row.user {
+      flex-direction: row-reverse;
+    }
+
+    .avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+      margin-top: 2px;
+    }
+
+    .avatar.bot-avatar {
+      background: linear-gradient(135deg, #4f8ef7 0%, #7c5be6 100%);
+    }
+
+    .avatar.user-avatar {
+      background: var(--navy-soft);
+      font-size: 13px;
+      color: #a8b8d8;
+    }
+
+    .bubble {
+      max-width: 620px;
+      padding: 13px 17px;
+      border-radius: 14px;
+      font-size: 14px;
+      line-height: 1.7;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .message-row.bot .bubble {
+      background: var(--card);
+      color: var(--text);
+      border-radius: 4px 14px 14px 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px var(--border);
+    }
+
+    .message-row.user .bubble {
+      background: var(--navy);
+      color: #e8edf8;
+      border-radius: 14px 4px 14px 14px;
+    }
+
+    .message-row.error .bubble {
+      background: var(--error-bg);
+      color: var(--error);
+      border-radius: 4px 14px 14px 14px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    }
+
+    .bubble-meta {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    .meta-tag {
+      background: var(--tag-bg);
+      color: var(--tag-text);
+      font-size: 11px;
+      font-weight: 500;
+      padding: 3px 9px;
+      border-radius: 20px;
+    }
+
+    /* Typing indicator */
+    .typing-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      animation: fadeUp 0.2s ease both;
+    }
+
+    .typing-bubble {
+      background: var(--card);
+      box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px var(--border);
+      border-radius: 4px 14px 14px 14px;
+      padding: 14px 18px;
+      display: flex;
+      gap: 5px;
+      align-items: center;
+    }
+
+    .typing-dot {
+      width: 7px;
+      height: 7px;
+      background: #b0bcd4;
+      border-radius: 50%;
+      animation: bounce 1.2s ease-in-out infinite;
+    }
+
+    .typing-dot:nth-child(2) { animation-delay: 0.15s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
+    @keyframes bounce {
+      0%, 60%, 100% { transform: translateY(0); }
+      30% { transform: translateY(-6px); }
+    }
+
+    /* ── INPUT AREA ──────────────────────────── */
     #input-area {
       flex-shrink: 0;
-      background: #fff;
-      border-top: 1px solid #e5e5e5;
-      padding: 16px 24px;
+      background: var(--card);
+      border-top: 1px solid var(--border);
+      padding: 16px 28px 20px;
+    }
+
+    .input-wrap {
       display: flex;
-      gap: 10px;
       align-items: flex-end;
+      gap: 10px;
+      background: var(--surface);
+      border: 1.5px solid var(--border);
+      border-radius: 14px;
+      padding: 10px 10px 10px 16px;
+      transition: border-color 0.15s, box-shadow 0.15s;
+    }
+
+    .input-wrap:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(79,142,247,0.12);
     }
 
     #question {
       flex: 1;
-      border: 1px solid #ddd;
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: 14.5px;
+      border: none;
+      background: transparent;
+      font-size: 14px;
       font-family: inherit;
       resize: none;
       max-height: 140px;
       outline: none;
-      transition: border-color 0.15s;
-      line-height: 1.5;
+      color: var(--text);
+      line-height: 1.55;
+      padding: 2px 0;
     }
 
-    #question:focus { border-color: #1a1a2e; }
+    #question::placeholder { color: #b0bcd4; }
 
     #send {
-      background: #1a1a2e;
+      width: 38px;
+      height: 38px;
+      background: var(--navy);
       color: #fff;
       border: none;
       border-radius: 10px;
-      padding: 10px 20px;
-      font-size: 14px;
-      font-weight: 600;
       cursor: pointer;
-      transition: background 0.15s;
-      height: 42px;
-      white-space: nowrap;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s, transform 0.1s;
     }
 
-    #send:hover { background: #2d2d5e; }
-    #send:disabled { background: #aaa; cursor: not-allowed; }
+    #send:hover { background: var(--accent-dim); }
+    #send:active { transform: scale(0.93); }
+    #send:disabled { background: #d0d7e6; cursor: not-allowed; transform: none; }
+
+    #send svg { width: 17px; height: 17px; }
+
+    .input-hint {
+      font-size: 11px;
+      color: #b8c2d8;
+      margin-top: 8px;
+      text-align: center;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <div class="badge">🦡</div>
+<div class="shell">
+
+  <!-- ── SIDEBAR ── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-icon">🦡</div>
+      <div class="brand-text">
+        <h1>Policy Badger</h1>
+        <p>Company Policy Assistant</p>
+      </div>
+    </div>
+
     <div>
-      <h1>Policy Badger</h1>
-      <p>Ask questions about company policies</p>
+      <div class="sidebar-section-label">Try asking</div>
+      <div class="suggestions">
+        <button class="suggestion-btn" onclick="ask('What is the deadline for submitting timesheets?')">What is the timesheet deadline?</button>
+        <button class="suggestion-btn" onclick="ask('How do I submit an expense report?')">How do I submit an expense report?</button>
+        <button class="suggestion-btn" onclick="ask('What is the dress code policy?')">What is the dress code policy?</button>
+        <button class="suggestion-btn" onclick="ask('Do I need approval for professional development?')">PD approval requirements?</button>
+        <button class="suggestion-btn" onclick="ask('How should time at a company holiday party be charged?')">Charging time at a holiday party?</button>
+        <button class="suggestion-btn" onclick="ask('What is Bitwarden and why do we use it?')">What is Bitwarden?</button>
+      </div>
     </div>
-  </header>
 
-  <div id="chat">
-    <div class="empty-state" id="empty">
-      <div class="icon">🦡</div>
-      <p>Ask me anything about company policy.</p>
-      <p class="hint">e.g. "What is the timesheet deadline?" or "Do I need approval for PD expenses?"</p>
+    <div class="sidebar-footer">
+      Answers are generated from your company's ingested policy documents. Always verify critical decisions with HR or your manager.
     </div>
+  </aside>
+
+  <!-- ── MAIN ── -->
+  <div class="main">
+
+    <!-- Topbar -->
+    <div class="topbar">
+      <span class="topbar-title">Policy Q&amp;A</span>
+      <div class="status-dot">
+        <div class="dot"></div>
+        <span>Connected</span>
+      </div>
+    </div>
+
+    <!-- Messages -->
+    <div id="chat">
+      <div class="empty-state" id="empty">
+        <div class="empty-icon">🦡</div>
+        <h2>Ask me anything about company policy</h2>
+        <p>I search through your ingested policy documents to give you accurate, sourced answers. Try one of the suggestions on the left, or type your own question.</p>
+      </div>
+    </div>
+
+    <!-- Input -->
+    <div id="input-area">
+      <div class="input-wrap">
+        <textarea id="question" rows="1" placeholder="Ask a policy question…" maxlength="1000"></textarea>
+        <button id="send" onclick="sendQuestion()" title="Send">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+      <div class="input-hint">Press Enter to send &nbsp;·&nbsp; Shift+Enter for new line</div>
+    </div>
+
   </div>
+</div>
 
-  <div id="input-area">
-    <textarea id="question" rows="1" placeholder="Ask a policy question..." maxlength="1000"></textarea>
-    <button id="send" onclick="sendQuestion()">Send</button>
-  </div>
+<script>
+  const chat  = document.getElementById('chat');
+  const input = document.getElementById('question');
+  const btn   = document.getElementById('send');
+  const empty = document.getElementById('empty');
 
-  <script>
-    const chat = document.getElementById('chat');
-    const input = document.getElementById('question');
-    const btn = document.getElementById('send');
-    const empty = document.getElementById('empty');
+  // Auto-resize textarea
+  input.addEventListener('input', () => {
+    input.style.height = 'auto';
+    input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+  });
 
-    // Auto-resize textarea
-    input.addEventListener('input', () => {
-      input.style.height = 'auto';
-      input.style.height = Math.min(input.scrollHeight, 140) + 'px';
-    });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      sendQuestion();
+    }
+  });
 
-    // Send on Enter (Shift+Enter for newline)
-    input.addEventListener('keydown', e => {
-      if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        sendQuestion();
-      }
-    });
+  function ask(text) {
+    input.value = text;
+    input.dispatchEvent(new Event('input'));
+    sendQuestion();
+  }
 
-    function appendMessage(text, type, meta) {
-      if (empty) empty.style.display = 'none';
-      const div = document.createElement('div');
-      div.className = 'message ' + type;
-      div.textContent = text;
-      if (meta) {
-        const m = document.createElement('div');
-        m.className = 'meta';
-        m.textContent = meta;
-        div.appendChild(m);
-      }
-      chat.appendChild(div);
-      chat.scrollTop = chat.scrollHeight;
-      return div;
+  function hideEmpty() {
+    if (empty) empty.style.display = 'none';
+  }
+
+  function appendUser(text) {
+    hideEmpty();
+    const row = document.createElement('div');
+    row.className = 'message-row user';
+    row.innerHTML = `
+      <div class="avatar user-avatar">You</div>
+      <div class="bubble">${escHtml(text)}</div>`;
+    chat.appendChild(row);
+    scrollDown();
+  }
+
+  function appendBot(text, rowsFound) {
+    hideEmpty();
+    const row = document.createElement('div');
+    row.className = 'message-row bot';
+
+    let metaHtml = '';
+    if (rowsFound != null) {
+      metaHtml = `<div class="bubble-meta">
+        <span class="meta-tag">${rowsFound} policy record${rowsFound !== 1 ? 's' : ''} matched</span>
+      </div>`;
     }
 
-    async function sendQuestion() {
-      const q = input.value.trim();
-      if (!q) return;
+    row.innerHTML = `
+      <div class="avatar bot-avatar">🦡</div>
+      <div class="bubble">${escHtml(text)}${metaHtml}</div>`;
+    chat.appendChild(row);
+    scrollDown();
+  }
 
-      appendMessage(q, 'user');
-      input.value = '';
-      input.style.height = 'auto';
-      btn.disabled = true;
+  function appendError(text) {
+    hideEmpty();
+    const row = document.createElement('div');
+    row.className = 'message-row error';
+    row.innerHTML = `
+      <div class="avatar bot-avatar">🦡</div>
+      <div class="bubble">${escHtml(text)}</div>`;
+    chat.appendChild(row);
+    scrollDown();
+  }
 
-      const thinking = document.createElement('div');
-      thinking.className = 'thinking';
-      thinking.textContent = 'Searching policies...';
-      chat.appendChild(thinking);
-      chat.scrollTop = chat.scrollHeight;
+  function addTyping() {
+    const row = document.createElement('div');
+    row.className = 'typing-row';
+    row.id = 'typing';
+    row.innerHTML = `
+      <div class="avatar bot-avatar">🦡</div>
+      <div class="typing-bubble">
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+        <div class="typing-dot"></div>
+      </div>`;
+    chat.appendChild(row);
+    scrollDown();
+    return row;
+  }
 
-      try {
-        const res = await fetch('/ask', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question: q }),
-        });
-        const data = await res.json();
-        thinking.remove();
+  function scrollDown() {
+    chat.scrollTop = chat.scrollHeight;
+  }
 
-        if (data.error) {
-          appendMessage('Error: ' + data.error, 'error');
-        } else {
-          const meta = data.rows_found != null
-            ? `${data.rows_found} policy row${data.rows_found !== 1 ? 's' : ''} found`
-            : null;
-          appendMessage(data.answer, 'bot', meta);
-        }
-      } catch (err) {
-        thinking.remove();
-        appendMessage('Could not reach the server. Is it running?', 'error');
+  function escHtml(str) {
+    return str
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/\n/g, '<br>');
+  }
+
+  async function sendQuestion() {
+    const q = input.value.trim();
+    if (!q || btn.disabled) return;
+
+    appendUser(q);
+    input.value = '';
+    input.style.height = 'auto';
+    btn.disabled = true;
+
+    const typing = addTyping();
+
+    try {
+      const res = await fetch('/ask', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question: q }),
+      });
+      const data = await res.json();
+      typing.remove();
+
+      if (data.error) {
+        appendError('Error: ' + data.error);
+      } else {
+        appendBot(data.answer, data.rows_found);
       }
-
-      btn.disabled = false;
-      input.focus();
+    } catch {
+      typing.remove();
+      appendError('Could not reach the server. Make sure it is running.');
     }
-  </script>
+
+    btn.disabled = false;
+    input.focus();
+  }
+</script>
 </body>
 </html>
