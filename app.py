@@ -5,8 +5,7 @@ Run locally: uvicorn app:app --reload
 
 from __future__ import annotations
 
-import hashlib
-import hmac
+import json
 import os
 import sys
 from pathlib import Path
@@ -26,16 +25,32 @@ sys.path.insert(0, str(_ROOT))
 from policy_engine.service import answer_policy_question
 
 # ── Auth config ───────────────────────────────────────────────────────────────
-# Credentials can be overridden via env vars; defaults match the demo user.
-APP_USER     = os.environ.get("APP_USER", "Test")
-APP_PASSWORD = os.environ.get("APP_PASSWORD", "Test123!")
-SECRET_KEY   = os.environ.get("APP_SECRET_KEY", "change-me-in-production-32chars!!")
+# APP_USERS is a JSON string: {"username": "plaintext_password", ...}
+# Falls back to a single user if APP_USERS is not set.
+SECRET_KEY = os.environ.get("APP_SECRET_KEY", "change-me-in-production-32chars!!")
 
-# Pre-hash the configured password once at startup
-_PW_HASH = bcrypt.hashpw(APP_PASSWORD.encode(), bcrypt.gensalt())
+def _load_users() -> dict[str, bytes]:
+    """Return {username: bcrypt_hash} for all configured users."""
+    raw = os.environ.get("APP_USERS", "")
+    if raw:
+        try:
+            pairs = json.loads(raw)
+        except Exception:
+            pairs = {}
+    else:
+        # Legacy single-user fallback
+        pairs = {
+            os.environ.get("APP_USER", "Test"): os.environ.get("APP_PASSWORD", "Test123!")
+        }
+    return {u: bcrypt.hashpw(p.encode(), bcrypt.gensalt()) for u, p in pairs.items()}
 
-def _check_password(plain: str) -> bool:
-    return bcrypt.checkpw(plain.encode(), _PW_HASH)
+_USERS: dict[str, bytes] = _load_users()
+
+def _check_password(username: str, plain: str) -> bool:
+    h = _USERS.get(username)
+    if not h:
+        return False
+    return bcrypt.checkpw(plain.encode(), h)
 
 # ── App setup ─────────────────────────────────────────────────────────────────
 app = FastAPI(title="Policy Badger", docs_url=None, redoc_url=None)
@@ -66,7 +81,7 @@ async def login_page(request: Request):
 
 @app.post("/login")
 async def login(request: Request, username: str = Form(...), password: str = Form(...)):
-    if username == APP_USER and _check_password(password):
+    if _check_password(username, password):
         request.session["user"] = username
         return RedirectResponse("/", status_code=302)
     return HTMLResponse(
