@@ -1,24 +1,26 @@
-# Firebase App Hosting configuration for Dockerfile-based backend
+runConfig:
+  cpu: 1
+  memoryMiB: 512
+  minInstances: 0
+  maxInstances: 3
+  concurrency: 80
 
-backends:
-  - id: default
-    build:
-      dockerfile: Dockerfile
-      context: .
-    runtime:
-      port: 8080
-      healthCheck:
-        path: /_stcore/health
-        # Service is considered healthy only on HTTP 200
-        expectedStatus: 200
-    env:
-      variables:
-        MODEL_CHOICE: gpt-4.1-mini
-        EMBEDDING_BACKEND: sentence
-        RAG_COLLECTION_NAME: docs_ibc_v2
-        CHROMA_DIR: /tmp/.calrag/chroma
-        FIREBASE_APP_HOSTING: "true"
-      # Bind OPENAI_API_KEY at deploy-time via Firebase secrets or protected envs.
-      # Example (CLI or Console): OPENAI_API_KEY → runtime secret (not committed)
-    ingress: public
-
+env:
+  - variable: APP_USER
+    value: Test
+  - variable: APP_PASSWORD
+    secret: APP_PASSWORD
+  - variable: APP_SECRET_KEY
+    secret: APP_SECRET_KEY
+  - variable: DB_HOST
+    secret: DB_HOST
+  - variable: DB_PORT
+    value: "5432"
+  - variable: DB_NAME
+    secret: DB_NAME
+  - variable: DB_USER
+    secret: DB_USER
+  - variable: DB_PASSWORD
+    secret: DB_PASSWORD
+  - variable: OPENAI_API_KEY
+    secret: OPENAI_API_KEY
