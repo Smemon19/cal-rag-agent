@@ -6,6 +6,7 @@ Install driver if needed: pip install psycopg2-binary
 """
 
 import os
+from pathlib import Path
 from typing import Any
 from contextlib import contextmanager
 
@@ -17,8 +18,9 @@ except Exception:  # pragma: no cover
     psycopg2 = None  # type: ignore
     RealDictCursor = None  # type: ignore
 
-# Load .env when this module is imported (idempotent). override=True so .env beats stale shell exports.
-load_dotenv(override=True)
+# Load .env using an explicit path relative to this file so it works regardless of CWD.
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=_ENV_FILE, override=True)
 
 
 def get_connection():
