@@ -108,8 +108,14 @@ chroma_db/
 # Temporary files
 *.tmp
 *.temp 
+tmp_*.json
 
 .pip-cache/
+
+# Local/generated tool artifacts
+.firebase/
+.local-bin/
+.sfdx/
 
 # Generated diagnostics and large artifacts under docs
 docs/diag_run_*/

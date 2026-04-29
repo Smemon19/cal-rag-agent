@@ -68,7 +68,8 @@ def test_staging_contract_accepts_valid_payload() -> None:
     assert "topic" in payload.mapped_fields_json
 
 
-def test_extractor_maps_annual_cap_alias() -> None:
+def test_extractor_maps_annual_cap_alias(monkeypatch) -> None:
+    monkeypatch.setenv("USE_LLM_SEMANTIC_EXTRACTION", "0")
     dictionary = SchemaDictionary()
     extractor = PolicyExtractor(dictionary)
     out = extractor.extract(
@@ -83,7 +84,8 @@ def test_extractor_maps_annual_cap_alias() -> None:
     assert out.payload.candidate_json.confidence >= 0.55
 
 
-def test_extractor_marks_filler_non_publishable() -> None:
+def test_extractor_marks_filler_non_publishable(monkeypatch) -> None:
+    monkeypatch.setenv("USE_LLM_SEMANTIC_EXTRACTION", "0")
     dictionary = SchemaDictionary()
     extractor = PolicyExtractor(dictionary)
     out = extractor.extract(

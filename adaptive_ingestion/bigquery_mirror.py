@@ -8,13 +8,42 @@ from datetime import datetime, timezone
 from typing import Any
 
 from google.cloud import bigquery
-from utils_bigquery import get_bq_client, get_bq_dataset, get_bq_project, insert_rows_json
+
+
+def _get_bq_project() -> str:
+    project = (
+        os.getenv("BQ_PROJECT")
+        or os.getenv("GOOGLE_CLOUD_PROJECT")
+        or os.getenv("GCLOUD_PROJECT")
+    )
+    if project:
+        return project
+    client = bigquery.Client()
+    if not client.project:
+        raise RuntimeError("BigQuery project is not configured.")
+    return str(client.project)
+
+
+def _get_bq_dataset() -> str:
+    return os.getenv("BQ_DATASET") or os.getenv("BIGQUERY_DATASET") or "cal_policy"
+
+
+def _get_bq_client(project: str) -> bigquery.Client:
+    return bigquery.Client(project=project)
+
+
+def _insert_rows_json(rows: list[dict[str, Any]], *, project: str, dataset: str, table: str) -> None:
+    client = _get_bq_client(project)
+    table_ref = f"{project}.{dataset}.{table}"
+    errors = client.insert_rows_json(table_ref, rows)
+    if errors:
+        raise RuntimeError(f"BigQuery insert_rows_json failed for {table_ref}: {errors}")
 
 
 class BigQueryMirror:
     def __init__(self) -> None:
-        self.project = get_bq_project()
-        self.dataset = os.getenv("BQ_POLICY_DATASET", get_bq_dataset())
+        self.project = _get_bq_project()
+        self.dataset = os.getenv("BQ_POLICY_DATASET", _get_bq_dataset())
         self.events_table = os.getenv("BQ_POLICY_EVENTS_TABLE", "policy_events")
         self.current_table = os.getenv("BQ_POLICY_CURRENT_TABLE", "policies_current")
 
@@ -34,12 +63,12 @@ class BigQueryMirror:
                     "payload_json": json.dumps(row.get("payload", {})),
                 }
             )
-        insert_rows_json(payload, project=self.project, dataset=self.dataset, table=self.events_table)
+        _insert_rows_json(payload, project=self.project, dataset=self.dataset, table=self.events_table)
 
     def upsert_current(self, rows: list[dict[str, Any]]) -> None:
         if not rows:
             return
-        client = get_bq_client(self.project)
+        client = _get_bq_client(self.project)
         full_table = f"{self.project}.{self.dataset}.{self.current_table}"
         query = f"""
         MERGE `{full_table}` t

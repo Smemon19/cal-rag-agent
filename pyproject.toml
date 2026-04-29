@@ -1,0 +1,2 @@
+[tool.pytest.ini_options]
+norecursedirs = ["legacy_archive", ".git", ".venv", "venv", ".venv_local"]

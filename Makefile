@@ -1,9 +1,6 @@
 PY := python
 
-.PHONY: eval tests
-
-eval:
-	$(PY) eval/runner.py --out eval/report.md | cat
+.PHONY: tests
 
 tests:
 	pytest -q

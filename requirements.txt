@@ -17,6 +17,12 @@ openai
 # Ingestion pipeline
 google-cloud-aiplatform
 google-auth>=2.20.0
+google-cloud-bigquery
 python-docx
 pdfplumber
 PyMuPDF
+PyYAML
+
+# Optional admin/dev tools
+streamlit
+google-cloud-secret-manager
