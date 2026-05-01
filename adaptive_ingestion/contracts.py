@@ -13,6 +13,7 @@ ChunkType = Literal[
     "discussion",
     "recommendation",
     "policy_rule",
+    "policy_list",
     "procedure",
     "definition",
     "faq",

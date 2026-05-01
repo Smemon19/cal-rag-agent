@@ -27,6 +27,7 @@ class PolicyExtractor:
         "discussion",
         "recommendation",
         "policy_rule",
+        "policy_list",
         "procedure",
         "definition",
         "faq",
@@ -122,6 +123,129 @@ class PolicyExtractor:
         if lines and lines[-1].strip() == "```":
             lines = lines[:-1]
         return "\n".join(lines).strip()
+
+    @staticmethod
+    def _normalize_list_text(text: str) -> str:
+        """Normalize list bullets and OCR bullet separators without changing normal prose."""
+        if not text:
+            return ""
+        cleaned = text.replace("\r\n", "\n").replace("\r", "\n")
+        cleaned = re.sub(r"[•◦▪▫]\s*", "\n- ", cleaned)
+
+        # OCR sometimes turns bullets into " e ". Only treat it as a list separator
+        # when there are multiple separators in a short list-like phrase.
+        if len(re.findall(r"\s+e\s+", cleaned)) >= 2:
+            parts = [p.strip() for p in re.split(r"\s+e\s+", cleaned) if p.strip()]
+            item_like = sum(
+                1
+                for part in parts
+                if re.search(r"\b(day|holiday|category|activity|requirement|tool|approval|time)\b", part, re.IGNORECASE)
+            )
+            if item_like >= 3:
+                cleaned = parts[0] + "".join(f"\n- {part}" for part in parts[1:])
+
+        cleaned = re.sub(
+            r"(?im)^([^:\n]*(?:holiday|holidays|categor(?:y|ies)|tools?|requirements?|activities|activity codes?)[^:\n]*):\s+([^-*\n].+)$",
+            r"\1:\n- \2",
+            cleaned,
+        )
+
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    @staticmethod
+    def _extract_list_items(cleaned_text: str) -> list[str]:
+        items: list[str] = []
+        for raw in cleaned_text.splitlines():
+            line = raw.strip()
+            if not line:
+                continue
+            m = re.match(r"^(?:[-*•]|\d+[\.)]|[A-Za-z][\.)])\s+(.+)$", line)
+            if not m:
+                continue
+            item = re.sub(r"\s+", " ", m.group(1).strip(" ;,"))
+            if item and item not in items:
+                items.append(item)
+        return items
+
+    @staticmethod
+    def _list_heading(cleaned_text: str) -> str | None:
+        heading_terms = r"(holiday|holidays|categor(?:y|ies)|tools?|requirements?|activities|activity codes?)"
+        lines = [line.strip() for line in cleaned_text.splitlines() if line.strip()]
+        for idx, line in enumerate(lines):
+            if re.search(heading_terms, line, re.IGNORECASE) and ":" in line:
+                return line.split(":")[0].strip()
+            if re.search(heading_terms, line, re.IGNORECASE) and idx + 1 < len(lines):
+                if re.match(r"^(?:[-*•]|\d+[\.)]|[A-Za-z][\.)])\s+", lines[idx + 1]):
+                    return line.strip(" :")
+        return None
+
+    @staticmethod
+    def _topic_from_list_heading(heading: str) -> str:
+        low = heading.lower()
+        if "holiday" in low:
+            return "Holidays"
+        if "categor" in low:
+            return "Categories"
+        if "activit" in low:
+            return "Activities"
+        if "tool" in low:
+            return "Tools"
+        if "requirement" in low:
+            return "Requirements"
+        return heading.title()
+
+    def _extract_complete_list_candidate(
+        self,
+        *,
+        document_id: str,
+        section_id: str,
+        section_text: str,
+    ) -> ExtractionResult | None:
+        cleaned = self._normalize_list_text(section_text)
+        items = self._extract_list_items(cleaned)
+        heading = self._list_heading(cleaned)
+        if not heading or len(items) < 3:
+            return None
+
+        topic = self._topic_from_list_heading(heading)
+        clean_list = heading + ":\n" + "\n".join(f"- {item}" for item in items)
+        summary_items = ", ".join(items[:8])
+        if len(items) > 8:
+            summary_items += f", and {len(items) - 8} more"
+        summary = f"{heading} list includes: {summary_items}."
+
+        mapped = {
+            "topic": FieldMappingValue(value=topic, confidence=0.9, provenance="deterministic:list_heading"),
+            "action_text": FieldMappingValue(value=clean_list, confidence=0.9, provenance="deterministic:complete_list"),
+        }
+
+        candidate = CandidateJson(
+            candidate_id=f"cand_{uuid4().hex}",
+            document_id=document_id,
+            section_id=section_id,
+            chunk_type="policy_list",
+            publishable=True,
+            summary=summary,
+            topic=topic,
+            subtopic=None,
+            condition_text=None,
+            action_text=clean_list,
+            recommendation_text=None,
+            entities=self._extract_entities(cleaned),
+            source_quote=clean_list,
+            reason_if_not_publishable=None,
+            rule_text=clean_list,
+            confidence=0.9,
+            extractor_version=self.extractor_version,
+            normalization_notes="Detected and preserved complete list deterministically.",
+        )
+        payload = StagingPayload(
+            candidate_json=candidate,
+            mapped_fields_json=mapped,
+            unmapped_concepts_json=[],
+        )
+        return ExtractionResult(payload=payload, confidence=candidate.confidence)
 
     def _get_llm(self):
         if self._llm_model is not None:
@@ -301,6 +425,14 @@ Chunk text:
         mapped: dict[str, FieldMappingValue] = {}
         unmapped: list[UnmappedConcept] = []
         low = normalized_text.lower()
+
+        list_result = self._extract_complete_list_candidate(
+            document_id=document_id,
+            section_id=section_id,
+            section_text=section_text,
+        )
+        if list_result is not None:
+            return list_result
 
         # LLM-first semantic extraction path (grounded in chunk text).
         if self.use_llm:

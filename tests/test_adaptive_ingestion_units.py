@@ -97,6 +97,71 @@ def test_extractor_marks_filler_non_publishable(monkeypatch) -> None:
     assert out.payload.candidate_json.publishable is False
 
 
+def test_extractor_preserves_raymond_holiday_list(monkeypatch) -> None:
+    monkeypatch.setenv("USE_LLM_SEMANTIC_EXTRACTION", "1")
+    dictionary = SchemaDictionary()
+    extractor = PolicyExtractor(dictionary)
+    section_text = """
+    on a holiday, they may use the holiday time on another day.
+    Raymond Holidays:
+    \u2022 New Years Day
+    \u2022 Martin Luther King, Jr. Day
+    \u2022 Memorial Day
+    \u2022 Fourth of July
+    \u2022 Labor Day
+    \u2022 Thanksgiving Day
+    \u2022 Day after Thanksgiving
+    \u2022 Christmas Day
+    \u2022 Two floating holidays to be used at any time with prior Supervisor approval
+    """
+
+    out = extractor.extract(document_id="doc_1", section_id="sec_471", section_text=section_text)
+    candidate = out.payload.candidate_json
+
+    assert candidate.chunk_type == "policy_list"
+    assert candidate.publishable is True
+    assert candidate.topic == "Holidays"
+    for holiday in (
+        "New Years Day",
+        "Martin Luther King, Jr. Day",
+        "Memorial Day",
+        "Fourth of July",
+        "Labor Day",
+        "Thanksgiving Day",
+        "Day after Thanksgiving",
+        "Christmas Day",
+        "Two floating holidays",
+    ):
+        assert holiday in candidate.source_quote
+        assert holiday in (candidate.action_text or "")
+    assert " e " not in candidate.source_quote
+    assert " e " not in (candidate.action_text or "")
+    assert out.payload.mapped_fields_json["action_text"].value == candidate.action_text
+
+
+def test_extractor_normalizes_corrupted_list_separators(monkeypatch) -> None:
+    monkeypatch.setenv("USE_LLM_SEMANTIC_EXTRACTION", "0")
+    dictionary = SchemaDictionary()
+    extractor = PolicyExtractor(dictionary)
+    section_text = (
+        "Raymond Holidays: Labor Day e Thanksgiving Day e Day after Thanksgiving "
+        "e Christmas Day e Two floating holidays to be used at any time with prior Supervisor approval"
+    )
+
+    out = extractor.extract(document_id="doc_1", section_id="sec_473", section_text=section_text)
+    candidate = out.payload.candidate_json
+
+    assert candidate.chunk_type == "policy_list"
+    assert candidate.publishable is True
+    assert "- Labor Day" in candidate.source_quote
+    assert "- Thanksgiving Day" in candidate.source_quote
+    assert "- Day after Thanksgiving" in candidate.source_quote
+    assert "- Christmas Day" in candidate.source_quote
+    assert "- Two floating holidays" in candidate.source_quote
+    assert " e " not in candidate.source_quote
+    assert " e " not in (candidate.action_text or "")
+
+
 def test_gap_detector_classifies_new_scalar() -> None:
     dictionary = SchemaDictionary()
     detector = GapDetector(dictionary)
