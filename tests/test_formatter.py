@@ -62,20 +62,101 @@ def test_rows_exist_no_direct_answer_returns_related_summary(monkeypatch: pytest
 
     answer = formatter.format_answer("Can I bill a company picnic?", rows)
 
+    assert "Direct Answer" in answer
+    assert "Key Details" in answer
+    assert "What You Should Do" in answer
     assert "I found related policy records" in answer
-    assert "could not find a direct policy" in answer
+    assert "not a direct answer" in answer
     assert "Time Tracking / Social Events" in answer
     assert "Do not include voluntary social event time" in answer
     assert "No policy found in the retrieved data" not in answer
 
 
-def test_normal_successful_answer_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
-    direct_answer = "Charge setup time for voluntary social events to Marketing."
-    monkeypatch.setattr(formatter, "OpenAI", _fake_openai_with_answer(direct_answer))
+def test_structured_successful_answer_is_preserved(monkeypatch: pytest.MonkeyPatch) -> None:
+    structured_answer = """Direct Answer
+Charge setup time for voluntary social events to Marketing.
+
+Key Details
+- Setup and breakdown time should be entered to Marketing.
+
+What You Should Do
+- Log only setup or breakdown time to Marketing."""
+    monkeypatch.setattr(formatter, "OpenAI", _fake_openai_with_answer(structured_answer))
 
     answer = formatter.format_answer(
         "Where should setup time go?",
         [{"topic": "Marketing", "action_text": "Charge setup time to Marketing."}],
     )
 
-    assert answer == direct_answer
+    assert answer == structured_answer
+
+
+def test_unstructured_answer_is_wrapped_with_action_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        formatter,
+        "OpenAI",
+        _fake_openai_with_answer("Yes, professional development time requires approval."),
+    )
+    rows = [
+        {
+            "topic": "Professional Development",
+            "approval_required": True,
+            "approver": "Manager",
+            "condition_text": "Professional development time must have specific learning goals.",
+            "action_text": "Get approval before logging professional development time.",
+            "exception_text": "The 120-hour limit is a rare maximum and approval is not guaranteed.",
+        }
+    ]
+
+    answer = formatter.format_answer("Does PD time need approval?", rows)
+
+    assert "Direct Answer" in answer
+    assert "Key Details" in answer
+    assert "Important Notes / Exceptions" in answer
+    assert "What You Should Do" in answer
+    assert "Approval required: Yes. Approver: Manager." in answer
+    assert "Professional development time must have specific learning goals." in answer
+    assert "The 120-hour limit is a rare maximum and approval is not guaranteed." in answer
+    assert "Get approval before logging professional development time." in answer
+
+
+def test_formatter_prompt_prioritizes_policy_fields(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeResponse(
+                """Direct Answer
+Use Marketing for event setup time.
+
+Key Details
+- Setup time belongs to Marketing.
+
+What You Should Do
+- Log setup time to Marketing."""
+            )
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        chat = _FakeChat()
+
+    monkeypatch.setattr(formatter, "OpenAI", _FakeOpenAI)
+
+    formatter.format_answer(
+        "Where should setup time go?",
+        [{"topic": "Marketing", "action_text": "Log setup time to Marketing."}],
+    )
+
+    messages = captured["messages"]
+    user_prompt = messages[1]["content"]
+    assert "Direct Answer" in user_prompt
+    assert "Key Details" in user_prompt
+    assert "Important Notes / Exceptions" in user_prompt
+    assert "What You Should Do" in user_prompt
+    assert "approval_required" in user_prompt
+    assert "exception_text" in user_prompt
+    assert "condition_text" in user_prompt
+    assert "action_text" in user_prompt
