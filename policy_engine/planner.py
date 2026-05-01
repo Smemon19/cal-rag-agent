@@ -14,6 +14,27 @@ from openai import OpenAI
 load_dotenv(override=True)
 
 ALLOWED_TABLE = "policies_v2"
+INTENT_COMPLETE_LIST = "complete_list"
+INTENT_APPROVAL_REQUIREMENT = "approval_requirement"
+INTENT_EXPENSE_CATEGORY = "expense_category"
+INTENT_TIMESHEET_ACTIVITY = "timesheet_activity"
+INTENT_PROCEDURE_STEPS = "procedure_steps"
+INTENT_DEFINITION = "definition"
+INTENT_ELIGIBILITY = "eligibility"
+INTENT_FALLBACK = "fallback"
+
+INTENTS: frozenset[str] = frozenset(
+    {
+        INTENT_COMPLETE_LIST,
+        INTENT_APPROVAL_REQUIREMENT,
+        INTENT_EXPENSE_CATEGORY,
+        INTENT_TIMESHEET_ACTIVITY,
+        INTENT_PROCEDURE_STEPS,
+        INTENT_DEFINITION,
+        INTENT_ELIGIBILITY,
+        INTENT_FALLBACK,
+    }
+)
 
 ALLOWED_FILTER_KEYS: frozenset[str] = frozenset(
     {
@@ -159,6 +180,68 @@ Return JSON only — no markdown, no explanation outside JSON.
   "reasoning_note": "which topics you picked and why"
 }}
 """
+
+
+def classify_intent(question: str) -> str:
+    """Classify the user's policy question with simple keyword rules."""
+    q = f" {(question or '').strip().lower()} "
+    compact = " ".join(q.split())
+
+    if "approval" in compact or "require approval" in compact or "need approval" in compact:
+        return INTENT_APPROVAL_REQUIREMENT
+
+    if "timesheet" in compact and ("activity" in compact or "select" in compact):
+        return INTENT_TIMESHEET_ACTIVITY
+
+    if "category" in compact or "categorize" in compact:
+        return INTENT_EXPENSE_CATEGORY
+
+    expense_terms = ("client dinner", "dinner", "meal", "meals", "expense", "expenses", "travel")
+    if "how do i charge" in compact and any(term in compact for term in expense_terms):
+        return INTENT_EXPENSE_CATEGORY
+
+    if "what are" in compact and (
+        " all " in q
+        or any(term in compact for term in ("holidays", "categories", "activity codes", "activities", "options"))
+    ):
+        return INTENT_COMPLETE_LIST
+
+    if "how do i" in compact or "steps" in compact or "submit" in compact:
+        return INTENT_PROCEDURE_STEPS
+
+    if "what is" in compact or "define" in compact:
+        return INTENT_DEFINITION
+
+    if "can i" in compact or "allowed" in compact:
+        return INTENT_ELIGIBILITY
+
+    return INTENT_FALLBACK
+
+
+def _append_requested_fields(search_spec: dict[str, Any], fields: tuple[str, ...]) -> None:
+    requested_fields = list(search_spec.get("requested_fields") or [])
+    for field in fields:
+        if field in ALLOWED_REQUESTED_FIELDS and field not in requested_fields:
+            requested_fields.append(field)
+    search_spec["requested_fields"] = requested_fields
+
+
+def _apply_intent_adjustments(search_spec: dict[str, Any], intent: str) -> dict[str, Any]:
+    if intent == INTENT_COMPLETE_LIST:
+        filters = dict(search_spec.get("filters") or {})
+        kept_filters = {
+            key: val
+            for key, val in filters.items()
+            if key in {"status", "topic", "batch_id", "document_id"}
+        }
+        search_spec["filters"] = kept_filters or {"status": filters.get("status", "active")}
+        _append_requested_fields(search_spec, ("topic", "subtopic", "summary", "status", "source_quote"))
+    elif intent in {INTENT_EXPENSE_CATEGORY, INTENT_TIMESHEET_ACTIVITY}:
+        _append_requested_fields(
+            search_spec,
+            ("activity_type", "charge_code", "bill_to", "topic", "is_billable", "source_quote"),
+        )
+    return search_spec
 
 
 def _strip_json_fences(text: str) -> str:
@@ -404,4 +487,8 @@ def plan_search(question: str, db_context: str = "") -> dict[str, Any]:
         raise ValueError("Planner returned no content.")
 
     parsed = _parse_planner_json(content)
-    return validate_and_normalize_search_spec(parsed)
+    search_spec = validate_and_normalize_search_spec(parsed)
+    detected_intent = classify_intent(q)
+    print(f"[Intent] {detected_intent} for question: {q}")
+    search_spec["intent"] = detected_intent
+    return _apply_intent_adjustments(search_spec, detected_intent)
