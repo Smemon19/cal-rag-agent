@@ -13,6 +13,7 @@ from typing import Any
 from policy_engine.planner import ALLOWED_FILTER_KEYS, ALLOWED_REQUESTED_FIELDS
 
 DEFAULT_LIMIT = 20
+COMPLETE_LIST_LIMIT = 80
 
 FIELD_SQL_MAP: dict[str, str] = {
     "document_id": "COALESCE(s.document_id::text, d.document_id::text)",
@@ -61,6 +62,136 @@ def _filter_expr(name: str) -> str:
     return FILTER_SQL_MAP.get(name, f"p.{_quote_ident(name)}")
 
 
+def _as_list(val: Any) -> list[Any]:
+    if isinstance(val, list):
+        return val
+    if val is None:
+        return []
+    return [val]
+
+
+def _build_filter_clause(col: str, val: Any) -> tuple[str | None, list[Any]]:
+    if col not in ALLOWED_FILTER_KEYS:
+        raise ValueError(f'Unknown filter column "{col}".')
+    if _is_empty_value(val):
+        return None, []
+
+    expr = _filter_expr(col)
+    case_insensitive = col in {"topic", "subtopic"}
+
+    if isinstance(val, list):
+        if col == "policy_category":
+            return f"({expr} = ANY(%s) OR {expr} IS NULL)", [val]
+        if case_insensitive:
+            return f"LOWER({expr}) = ANY(%s)", [[str(v).lower() for v in val]]
+        return f"{expr} = ANY(%s)", [val]
+
+    if col == "policy_category":
+        return f"({expr} = %s OR {expr} IS NULL)", [val]
+    if case_insensitive:
+        return f"LOWER({expr}) = LOWER(%s)", [val]
+    return f"{expr} = %s", [val]
+
+
+def _complete_list_terms(filters: dict[str, Any]) -> list[str]:
+    terms: list[str] = []
+    for key in ("topic", "subtopic", "policy_category"):
+        for val in _as_list(filters.get(key)):
+            text = str(val or "").strip()
+            if text and text.lower() != "active" and text not in terms:
+                terms.append(text)
+    return terms
+
+
+def _complete_list_match_clause(terms: list[str]) -> tuple[str, list[Any]]:
+    if not terms:
+        return "TRUE", []
+
+    text_expr = (
+        "LOWER(COALESCE(NULLIF(p.topic, ''), s.candidate_json->>'topic', '')) || ' ' || "
+        "LOWER(COALESCE(NULLIF(p.subtopic, ''), s.candidate_json->>'subtopic', '')) || ' ' || "
+        "LOWER(COALESCE(p.policy_category, '')) || ' ' || "
+        "LOWER(COALESCE(s.candidate_json->>'summary', '')) || ' ' || "
+        "LOWER(COALESCE(NULLIF(p.condition_text, ''), s.candidate_json->>'condition_text', '')) || ' ' || "
+        "LOWER(COALESCE(NULLIF(p.action_text, ''), s.candidate_json->>'action_text', '')) || ' ' || "
+        "LOWER(COALESCE(NULLIF(p.source_quote, ''), s.candidate_json->>'source_quote', ''))"
+    )
+    clauses = [f"{text_expr} LIKE %s" for _term in terms]
+    params = [f"%{term.lower()}%" for term in terms]
+    return "(" + " OR ".join(clauses) + ")", params
+
+
+def _build_complete_list_query(search_spec: dict, select_clause: str) -> tuple[str, tuple[Any, ...]]:
+    filters: dict[str, Any] = dict(search_spec.get("filters") or {})
+    scope_clauses: list[str] = []
+    params: list[Any] = []
+
+    for col in ("status", "batch_id", "document_id"):
+        if col in filters:
+            clause, clause_params = _build_filter_clause(col, filters[col])
+            if clause:
+                scope_clauses.append(clause)
+                params.extend(clause_params)
+
+    terms = _complete_list_terms(filters)
+    match_clause, match_params = _complete_list_match_clause(terms)
+    params.extend(match_params)
+
+    document_expr = "COALESCE(s.document_id::text, d.document_id::text)"
+    section_expr = "p.section_id::text"
+    sibling_clause = ""
+    sibling_params: list[Any] = []
+    if terms:
+        sibling_match_clause, sibling_match_params = _complete_list_match_clause(terms)
+        sibling_clause = f"""
+        OR {document_expr} IN (
+            SELECT DISTINCT COALESCE(s2.document_id::text, d2.document_id::text)
+            FROM policies_v2 p2
+            LEFT JOIN policy_publish_audit a2
+              ON a2.policy_id = p2.policy_id::text
+             AND a2.publish_status = 'published'
+            LEFT JOIN policy_extractions_staging s2
+              ON s2.extraction_id = a2.extraction_id
+            LEFT JOIN sections sec2
+              ON sec2.section_id::text = p2.section_id::text
+            LEFT JOIN documents d2
+              ON d2.document_id::text = sec2.document_id::text
+            WHERE {sibling_match_clause.replace("p.", "p2.").replace("s.", "s2.")}
+        )
+        OR {section_expr} IN (
+            SELECT DISTINCT p3.section_id::text
+            FROM policies_v2 p3
+            LEFT JOIN policy_publish_audit a3
+              ON a3.policy_id = p3.policy_id::text
+             AND a3.publish_status = 'published'
+            LEFT JOIN policy_extractions_staging s3
+              ON s3.extraction_id = a3.extraction_id
+            LEFT JOIN sections sec3
+              ON sec3.section_id::text = p3.section_id::text
+            LEFT JOIN documents d3
+              ON d3.document_id::text = sec3.document_id::text
+            WHERE {sibling_match_clause.replace("p.", "p3.").replace("s.", "s3.")}
+        )
+        """
+        sibling_params = sibling_match_params + sibling_match_params
+
+    scope_sql = " AND ".join(scope_clauses) if scope_clauses else "TRUE"
+    where_sql = f"{scope_sql} AND ({match_clause}{sibling_clause})"
+    params.extend(sibling_params)
+
+    sql = (
+        f"SELECT {select_clause}\n"
+        f"{BASE_FROM_SQL.strip()}\n"
+        f"WHERE {where_sql}\n"
+        f"ORDER BY\n"
+        f"  COALESCE(NULLIF(p.topic, ''), s.candidate_json->>'topic'),\n"
+        f"  COALESCE(NULLIF(p.subtopic, ''), s.candidate_json->>'subtopic'),\n"
+        f"  p.policy_id\n"
+        f"LIMIT {int(COMPLETE_LIST_LIMIT)}"
+    )
+    return sql, tuple(params)
+
+
 def build_query_from_spec(search_spec: dict) -> tuple[str, tuple[Any, ...]]:
     """
     Build SELECT ... FROM policies_v2 WHERE ... LIMIT n (default 10).
@@ -80,43 +211,19 @@ def build_query_from_spec(search_spec: dict) -> tuple[str, tuple[Any, ...]]:
             raise ValueError(f'REQUESTED field not allowlisted: "{f}"')
 
     select_clause = ", ".join(f'{_select_expr(f)} AS "{f}"' for f in fields)
+    if search_spec.get("intent") == "complete_list":
+        return _build_complete_list_query(search_spec, select_clause)
+
     filters: dict[str, Any] = dict(search_spec.get("filters") or {})
 
     clauses: list[str] = []
     params: list[Any] = []
 
     for col in sorted(filters.keys()):
-        if col not in ALLOWED_FILTER_KEYS:
-            raise ValueError(f'Unknown filter column "{col}".')
-        val = filters[col]
-        expr = _filter_expr(col)
-
-        # topic and subtopic use case-insensitive matching so planner
-        # capitalisation differences don't cause zero-row misses.
-        case_insensitive = col in {"topic", "subtopic"}
-
-        if isinstance(val, list):
-            if not val:
-                continue
-            if col == "policy_category":
-                clauses.append(f"({expr} = ANY(%s) OR {expr} IS NULL)")
-                params.append(val)
-            elif case_insensitive:
-                clauses.append(f"LOWER({expr}) = ANY(%s)")
-                params.append([v.lower() for v in val])
-            else:
-                clauses.append(f"{expr} = ANY(%s)")
-                params.append(val)
-        else:
-            if col == "policy_category":
-                clauses.append(f"({expr} = %s OR {expr} IS NULL)")
-                params.append(val)
-            elif case_insensitive:
-                clauses.append(f"LOWER({expr}) = LOWER(%s)")
-                params.append(val)
-            else:
-                clauses.append(f"{expr} = %s")
-                params.append(val)
+        clause, clause_params = _build_filter_clause(col, filters[col])
+        if clause:
+            clauses.append(clause)
+            params.extend(clause_params)
 
     where_sql = " AND ".join(clauses) if clauses else "TRUE"
     sql = (
