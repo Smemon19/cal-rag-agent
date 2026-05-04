@@ -16,6 +16,7 @@ from policy_engine.db import run_query
 from policy_engine.formatter import format_answer
 from policy_engine.planner import fetch_db_context, plan_search
 from policy_engine.query_builder import build_query_from_spec, build_text_fallback_query, relaxed_specs_in_order
+from policy_engine.synonyms import expand_question
 
 # Cache the DB context so we don't hit the DB on every single question.
 _db_context_cache: str = ""
@@ -106,7 +107,9 @@ def answer_policy_question(question: str, *, batch_id: str | None = None, docume
 
     # Step 1–2: planner validates/normalizes the spec internally.
     # Ground the planner in real DB values so it doesn't guess filter values.
-    search_spec = plan_search(q, db_context=_get_db_context())
+    expanded_question = expand_question(q)
+    print(f"[Synonym Expansion] {expanded_question}")
+    search_spec = plan_search(expanded_question, db_context=_get_db_context())
     scope = _extract_scope_from_question(q)
     if batch_id:
         scope["batch_id"] = batch_id
