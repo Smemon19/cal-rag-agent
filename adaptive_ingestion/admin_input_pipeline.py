@@ -1,5 +1,6 @@
 import datetime
 import uuid
+import json
 from dataclasses import asdict, dataclass, field
 from typing import Any, Dict
 
@@ -18,15 +19,26 @@ class AdminSubmission:
     status: str = "draft"  # draft, extracted, needs_clarification, needs_review, published
     created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
     effective_date: datetime.datetime | None = None
+    submitted_by: str | None = None
+    reviewed_by: str | None = None
+    published_by: str | None = None
+    reviewed_at: datetime.datetime | None = None
+    published_at: datetime.datetime | None = None
+    source_type: str = "admin_entry"
+    version: int = 1
+    replaces_policy_id: str | None = None
+    published_policy_id: str | None = None
 
 
 _submissions: Dict[str, AdminSubmission] = {}
 
-def create_submission(title: str, raw_text: str) -> AdminSubmission:
+def create_submission(title: str, raw_text: str, submitted_by: str | None = None, effective_date: datetime.datetime | None = None) -> AdminSubmission:
     sub = AdminSubmission(
         id=str(uuid.uuid4()),
         title=title,
         raw_text=raw_text,
+        submitted_by=submitted_by,
+        effective_date=effective_date
     )
     _submissions[sub.id] = sub
     return sub
@@ -111,7 +123,7 @@ def preview_submission(submission: AdminSubmission, question: str = "What is the
         "simulated_answer": answer
     }
 
-def publish_submission(submission: AdminSubmission) -> str:
+def publish_submission(submission: AdminSubmission, published_by: str | None = None) -> str:
     if submission.status not in ("extracted", "needs_review"):
         raise ValueError(f"Cannot publish submission in status {submission.status}")
         
@@ -141,4 +153,34 @@ def publish_submission(submission: AdminSubmission) -> str:
     policy_id = rows[0]["policy_id"] if rows else "unknown"
     
     submission.status = "published"
+    submission.published_at = datetime.datetime.now()
+    submission.published_by = published_by
+    submission.published_policy_id = str(policy_id)
+    
+    # Insert audit record
+    audit_sql = """
+        INSERT INTO admin_policy_publish_audit (
+            submission_id, published_policy_id, submitted_by, published_by,
+            raw_text, extracted_json, final_json, source_type, version,
+            replaces_policy_id, created_at, published_at
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+    """
+    audit_params = (
+        submission.id,
+        submission.published_policy_id,
+        submission.submitted_by,
+        submission.published_by,
+        submission.raw_text,
+        json.dumps(submission.extracted_json),
+        json.dumps(submission.extracted_json),
+        submission.source_type,
+        submission.version,
+        submission.replaces_policy_id,
+        submission.created_at,
+        submission.published_at
+    )
+    execute(audit_sql, audit_params)
+    
     return str(policy_id)

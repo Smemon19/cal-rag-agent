@@ -79,8 +79,12 @@ def test_publish_inserts_correctly(monkeypatch):
         called_sql = sql
         called_params = params
         return [{"policy_id": "test_id_123"}]
+        
+    def mock_execute(sql, params):
+        pass
     
     monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.run_query", mock_run_query)
+    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.execute", mock_execute)
     
     policy_id = publish_submission(sub)
     
@@ -149,3 +153,63 @@ def test_clarification_improves_confidence(monkeypatch):
     
     validate_submission(sub)
     assert sub.status == "extracted"
+
+def test_create_submission_stores_audit_metadata():
+    sub = create_submission("Test Audit", "Content", submitted_by="admin@example.com")
+    assert sub.submitted_by == "admin@example.com"
+    assert sub.created_at is not None
+    assert sub.version == 1
+    assert sub.source_type == "admin_entry"
+    assert sub.replaces_policy_id is None
+
+def test_publish_submission_stores_audit_record(monkeypatch):
+    sub = AdminSubmission(
+        id="audit_sub_1", 
+        title="T", 
+        raw_text="Audit text", 
+        status="extracted",
+        submitted_by="creator@example.com"
+    )
+    sub.extracted_json = {"item": {"topic": "Audit", "action_text": "Do audit", "source_quote": "Q"}}
+
+    called_sqls = []
+    called_params = []
+    
+    def mock_run_query(sql, params):
+        called_sqls.append(sql)
+        called_params.append(params)
+        return [{"policy_id": "new_policy_123"}]
+        
+    def mock_execute(sql, params):
+        called_sqls.append(sql)
+        called_params.append(params)
+        return 1
+
+    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.run_query", mock_run_query)
+    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.execute", mock_execute)
+    
+    # We can simulate replacing an older policy
+    sub.replaces_policy_id = "old_policy_456"
+    
+    policy_id = publish_submission(sub, published_by="publisher@example.com")
+    
+    assert policy_id == "new_policy_123"
+    assert sub.published_policy_id == "new_policy_123"
+    assert sub.published_by == "publisher@example.com"
+    assert sub.published_at is not None
+    
+    # Verify execute was called for the audit log
+    audit_sql = called_sqls[1]
+    audit_args = called_params[1]
+    
+    assert "INSERT INTO admin_policy_publish_audit" in audit_sql
+    # audit_params: (submission.id, submission.published_policy_id, submission.submitted_by, submission.published_by, submission.raw_text, json.dumps(submission.extracted_json), json.dumps(submission.extracted_json), submission.source_type, submission.version, submission.replaces_policy_id, submission.created_at, submission.published_at)
+    assert audit_args[0] == "audit_sub_1"
+    assert audit_args[1] == "new_policy_123"
+    assert audit_args[2] == "creator@example.com"
+    assert audit_args[3] == "publisher@example.com"
+    assert audit_args[4] == "Audit text"
+    assert '"topic": "Audit"' in audit_args[5] # JSON string of extracted_json
+    assert audit_args[7] == "admin_entry"
+    assert audit_args[8] == 1
+    assert audit_args[9] == "old_policy_456"

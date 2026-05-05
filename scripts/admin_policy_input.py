@@ -15,6 +15,7 @@ from adaptive_ingestion.admin_input_pipeline import (
 
 def main():
     print("=== Admin Policy Input Pipeline (V1) ===")
+    submitted_by = input("Enter your name or email (submitted_by): ").strip()
     title = input("Enter policy title: ").strip()
     print("Enter raw policy text (Press Ctrl-D or Ctrl-Z on Windows to finish):")
     raw_text = sys.stdin.read().strip()
@@ -24,7 +25,7 @@ def main():
         return
         
     print("\n[1/4] Creating submission...")
-    sub = create_submission(title, raw_text)
+    sub = create_submission(title, raw_text, submitted_by=submitted_by)
     
     print("[2/4] Extracting structured data...")
     extract_submission(sub)
@@ -70,12 +71,18 @@ def main():
     if sub.status == "needs_review":
         print("\nWARNING: Submission flagged as 'needs_review' due to missing fields.")
     
+    print("\n--- Audit Metadata ---")
+    print(f"Submitted By: {sub.submitted_by}")
+    print(f"Source Type: {sub.source_type}")
+    print(f"Version: {sub.version}")
+    
     choice = input("\nPublish this policy? (y/n): ").strip().lower()
     if choice == 'y':
         print("[4/4] Publishing...")
         try:
-            policy_id = publish_submission(sub)
+            policy_id = publish_submission(sub, published_by=sub.submitted_by)
             print(f"Successfully published! Policy ID: {policy_id}")
+            print(f"Audit record created with submission_id: {sub.id}")
         except Exception as e:
             print(f"Failed to publish: {e}")
     else:
