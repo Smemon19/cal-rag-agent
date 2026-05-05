@@ -126,7 +126,7 @@ def answer_policy_question(question: str, *, batch_id: str | None = None, docume
         rows = run_query(sql, params)
     except Exception as db_error:
         rows = _offline_rows_for_question(q)
-        answer = format_answer(q, rows)
+        answer = format_answer(q, rows, intent=search_spec.get("intent"))
         return {
             "question": q,
             "search_spec": search_spec,
@@ -173,7 +173,7 @@ def answer_policy_question(question: str, *, batch_id: str | None = None, docume
                 text_fallback_params = list(params_t)
 
     # Step 5: answer from rows only
-    answer = format_answer(q, rows)
+    answer = format_answer(q, rows, intent=search_spec.get("intent"))
 
     return {
         "question": q,

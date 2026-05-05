@@ -47,7 +47,7 @@ def test_service_passes_expanded_question_to_planner(monkeypatch) -> None:
     monkeypatch.setattr(service, "plan_search", fake_plan_search)
     monkeypatch.setattr(service, "build_query_from_spec", lambda _spec: ("SELECT 1", ()))
     monkeypatch.setattr(service, "run_query", lambda _sql, _params=(): [{"topic": "Expenses"}])
-    monkeypatch.setattr(service, "format_answer", lambda _question, _rows: "answer")
+    monkeypatch.setattr(service, "format_answer", lambda _question, _rows, **kwargs: "answer")
 
     result = service.answer_policy_question("How do I charge a client dinner?")
 

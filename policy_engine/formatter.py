@@ -168,7 +168,7 @@ def _related_records_answer(rows: list[dict]) -> str:
     )
 
 
-def format_answer(question: str, rows: list[dict]) -> str:
+def format_answer(question: str, rows: list[dict], intent: str | None = None) -> str:
     """
     Produce a concise, structured answer from the user question and DB rows only.
     For comparison questions, multiple rows should be contrasted explicitly.
@@ -183,6 +183,18 @@ def format_answer(question: str, rows: list[dict]) -> str:
         "You are a policy assistant. Answer the user's question using ONLY the evidence in the provided rows. "
         "Do not invent facts. Do not hallucinate rules or codes. Be clear, practical, and slightly conversational."
     )
+    intent_instruction = ""
+    if intent == "expense_category":
+        intent_instruction = "\n- INTENT: The user is asking about an expense category. Direct Answer should emphasize the category FIRST, then include approval/process."
+    elif intent == "approval_requirement":
+        intent_instruction = "\n- INTENT: The user is asking about an approval requirement. Direct Answer should be YES/NO first, then include details."
+    elif intent == "complete_list":
+        intent_instruction = "\n- INTENT: The user is asking for a complete list. Return the full list cleanly, and avoid unnecessary extra explanation."
+    elif intent == "definition":
+        intent_instruction = "\n- INTENT: The user is asking for a definition. Give a clean definition first, with minimal extra detail."
+    elif intent == "procedure_steps":
+        intent_instruction = "\n- INTENT: The user is asking for procedure steps. Focus on step-by-step instructions in the response."
+
     user_content = f"""User question:
 {question}
 
@@ -205,7 +217,7 @@ Instructions:
   - <exceptions, rare cases, caveats, or approval nuance; omit this section only if none apply>
 
   What You Should Do
-  - <specific action guidance for the employee>
+  - <specific action guidance for the employee>{intent_instruction}
 - Answer the question directly using the most relevant row(s). Prefer source_quote for exact facts (dates, numbers, codes), but do not dump raw policy text.
 - If the answer spans multiple rows, synthesize them into one clear response.
 - Never say "No policy found in the retrieved data" when rows are provided.

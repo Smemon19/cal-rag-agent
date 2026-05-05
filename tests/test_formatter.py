@@ -160,3 +160,40 @@ What You Should Do
     assert "exception_text" in user_prompt
     assert "condition_text" in user_prompt
     assert "action_text" in user_prompt
+
+
+def test_formatter_adds_intent_instructions(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class _FakeCompletions:
+        def create(self, **kwargs):
+            captured.update(kwargs)
+            return _FakeResponse("Direct Answer\nMock.")
+
+    class _FakeChat:
+        completions = _FakeCompletions()
+
+    class _FakeOpenAI:
+        chat = _FakeChat()
+
+    monkeypatch.setattr(formatter, "OpenAI", _FakeOpenAI)
+
+    # Test expense_category
+    formatter.format_answer("client dinner", [{"topic": "Meals"}], intent="expense_category")
+    assert "emphasize the category FIRST" in captured["messages"][1]["content"]
+
+    # Test approval_requirement
+    formatter.format_answer("approval", [{"topic": "Meals"}], intent="approval_requirement")
+    assert "YES/NO first" in captured["messages"][1]["content"]
+
+    # Test complete_list
+    formatter.format_answer("list", [{"topic": "Meals"}], intent="complete_list")
+    assert "full list cleanly" in captured["messages"][1]["content"]
+
+    # Test definition
+    formatter.format_answer("definition", [{"topic": "Meals"}], intent="definition")
+    assert "clean definition first" in captured["messages"][1]["content"]
+
+    # Test procedure_steps
+    formatter.format_answer("how to", [{"topic": "Meals"}], intent="procedure_steps")
+    assert "step-by-step instructions" in captured["messages"][1]["content"]
