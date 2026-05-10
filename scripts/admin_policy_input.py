@@ -10,15 +10,27 @@ from adaptive_ingestion.admin_input_pipeline import (
     extract_submission,
     validate_submission,
     preview_submission,
-    publish_submission
+    publish_submission,
+    generate_clarification_questions
 )
 
 def main():
     print("=== Admin Policy Input Pipeline (V1) ===")
     submitted_by = input("Enter your name or email (submitted_by): ").strip()
     title = input("Enter policy title: ").strip()
-    print("Enter raw policy text (Press Ctrl-D or Ctrl-Z on Windows to finish):")
-    raw_text = sys.stdin.read().strip()
+    print("Enter raw policy text (Type 'DONE' on a new line to finish):")
+    
+    lines = []
+    while True:
+        try:
+            line = input()
+            if line.strip() == 'DONE':
+                break
+            lines.append(line)
+        except EOFError:
+            break
+            
+    raw_text = "\n".join(lines).strip()
     
     if not title or not raw_text:
         print("Title and raw text are required.")
@@ -33,31 +45,46 @@ def main():
     print("[3/4] Validating...")
     validate_submission(sub)
     
-    from adaptive_ingestion.admin_input_pipeline import generate_clarification_questions
-    
     while sub.status == "needs_clarification":
-        print("\nI need more information before this can be published:")
+        print("\n[!] Needs Clarification:")
+        print("I need more information before this can be processed:")
         qs = generate_clarification_questions(sub)
         for q in qs:
             print(f"- {q}")
             
-        ans = input("\nProvide clarification (or press Enter to skip): ").strip()
-        if ans:
-            sub.raw_text += f"\nClarification: {ans}"
-            print("[2/4] Re-extracting structured data...")
-            extract_submission(sub)
-            print("[3/4] Re-validating...")
-            validate_submission(sub)
-        else:
+        ans = input("\nProvide clarification (or type 'skip' to skip): ").strip()
+        if ans.lower() == 'skip' or not ans:
             break
+            
+        sub.raw_text += f"\nClarification: {ans}"
+        print("[2/4] Re-extracting structured data...")
+        extract_submission(sub)
+        print("[3/4] Re-validating...")
+        validate_submission(sub)
             
     print("\n--- Extraction Result ---")
     print(f"Status: {sub.status}")
     print(f"Confidence: {sub.confidence:.2f}")
-    print(json.dumps(sub.extracted_json, indent=2))
     
+    item = sub.extracted_json.get("item", {})
+    if item:
+        print("Extracted Fields:")
+        for key, val in item.items():
+            if val:
+                print(f"  {key.capitalize()}: {val}")
+    else:
+        print("Extracted Fields: None")
+        
     if sub.status == "needs_clarification":
-        print("\nPublishing blocked: Policy still needs clarification.")
+        print("\n[X] Publishing blocked: Policy lacks essential information (needs_clarification).")
+        return
+        
+    if sub.status == "needs_review":
+        print("\n[X] Publishing blocked: Policy is missing required fields like source_quote (needs_review).")
+        return
+        
+    if sub.status != "extracted":
+        print(f"\n[X] Publishing blocked: Unknown status {sub.status}.")
         return
         
     print("\n--- Preview ---")
@@ -68,16 +95,13 @@ def main():
         print(f"Sample Question: {preview['sample_question']}")
         print(f"Simulated Chatbot Answer:\n{preview['simulated_answer']}")
         
-    if sub.status == "needs_review":
-        print("\nWARNING: Submission flagged as 'needs_review' due to missing fields.")
-    
     print("\n--- Audit Metadata ---")
     print(f"Submitted By: {sub.submitted_by}")
     print(f"Source Type: {sub.source_type}")
     print(f"Version: {sub.version}")
     
-    choice = input("\nPublish this policy? (y/n): ").strip().lower()
-    if choice == 'y':
+    choice = input("\nPublish this policy? (y/yes to publish, anything else to cancel): ").strip().lower()
+    if choice in ('y', 'yes'):
         print("[4/4] Publishing...")
         try:
             policy_id = publish_submission(sub, published_by=sub.submitted_by)
