@@ -13,9 +13,19 @@ from adaptive_ingestion.admin_input_pipeline import (
     publish_submission,
     generate_clarification_questions
 )
+import argparse
 
 def main():
+    parser = argparse.ArgumentParser(description="Admin Policy Input Pipeline (V1)")
+    parser.add_argument("--use-llm", action="store_true", help="Enable LLM-assisted extraction")
+    args = parser.parse_args()
+
     print("=== Admin Policy Input Pipeline (V1) ===")
+    if args.use_llm:
+        print("Mode: LLM-assisted extraction")
+    else:
+        print("Mode: deterministic extraction")
+        
     submitted_by = input("Enter your name or email (submitted_by): ").strip()
     title = input("Enter policy title: ").strip()
     print("Enter raw policy text (Type 'DONE' on a new line to finish):")
@@ -40,7 +50,7 @@ def main():
     sub = create_submission(title, raw_text, submitted_by=submitted_by)
     
     print("[2/4] Extracting structured data...")
-    extract_submission(sub)
+    extract_submission(sub, use_llm=args.use_llm)
     
     print("[3/4] Validating...")
     validate_submission(sub)
@@ -58,7 +68,7 @@ def main():
             
         sub.raw_text += f"\nClarification: {ans}"
         print("[2/4] Re-extracting structured data...")
-        extract_submission(sub)
+        extract_submission(sub, use_llm=args.use_llm)
         print("[3/4] Re-validating...")
         validate_submission(sub)
             

@@ -60,11 +60,11 @@ def _candidate_to_dict(candidate: Any) -> Dict[str, Any]:
         f"candidate_json must be a pydantic model, dataclass, or dict, got {type(candidate).__name__}"
     )
 
-def extract_submission(submission: AdminSubmission) -> None:
+def extract_submission(submission: AdminSubmission, use_llm: bool = False) -> None:
     schema_dict = SchemaDictionary()
-    # Force deterministic extraction by disabling LLM for speed/reliability in V1
+    # Use deterministic extraction by default for speed/reliability in V1, unless LLM requested
     extractor = PolicyExtractor(schema_dictionary=schema_dict)
-    extractor.use_llm = False
+    extractor.use_llm = use_llm
     
     result = extractor.extract(
         document_id=submission.id,

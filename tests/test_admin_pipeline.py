@@ -243,3 +243,36 @@ def test_publish_submission_stores_audit_record(monkeypatch):
     assert audit_args[7] == "admin_entry"
     assert audit_args[8] == 1
     assert audit_args[9] == "old_policy_456"
+
+def test_extraction_with_llm_flag(monkeypatch):
+    from adaptive_ingestion.admin_input_pipeline import extract_submission, create_submission
+    
+    sub = create_submission("LLM Policy", "Testing LLM flag.")
+    
+    called_use_llm = None
+    
+    class MockExtractor:
+        def __init__(self, **kwargs):
+            self.use_llm = False
+            
+        def extract(self, **kwargs):
+            nonlocal called_use_llm
+            called_use_llm = self.use_llm
+            
+            class MockPayload:
+                candidate_json = {
+                    "topic": "LLM Topic",
+                    "action_text": "LLM Action",
+                    "source_quote": "Testing LLM flag."
+                }
+            class MockResult:
+                payload = MockPayload()
+            return MockResult()
+
+    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
+
+    extract_submission(sub, use_llm=True)
+    
+    assert called_use_llm is True
+    assert sub.status == "extracted"
+    assert sub.extracted_json["item"]["topic"] == "LLM Topic"
