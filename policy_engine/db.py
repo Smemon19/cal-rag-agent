@@ -18,9 +18,12 @@ except Exception:  # pragma: no cover
     psycopg2 = None  # type: ignore
     RealDictCursor = None  # type: ignore
 
-# Load .env using an explicit path relative to this file so it works regardless of CWD.
-_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
-load_dotenv(dotenv_path=_ENV_FILE, override=True)
+from pathlib import Path
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env", override=True)
+print(f"Loaded .env from: {ROOT / '.env'}")
 
 
 def get_connection():

@@ -42,6 +42,36 @@ def test_extraction_works(monkeypatch):
     assert "item" in sub.extracted_json
     assert sub.extracted_json["item"]["topic"] == "Meals"
 
+def test_extraction_works_with_dict(monkeypatch):
+    sub = create_submission("Test Policy", "If you work late, charge dinner to 1234.")
+    
+    class MockPayload:
+        def __init__(self):
+            self.candidate_json = {
+                "topic": "Meals",
+                "action_text": "Charge dinner to 1234.",
+                "condition_text": "If you work late",
+                "source_quote": "If you work late, charge dinner to 1234."
+            }
+
+    class MockResult:
+        def __init__(self):
+            self.payload = MockPayload()
+
+    class MockExtractor:
+        def __init__(self, **kwargs):
+            self.use_llm = False
+        def extract(self, **kwargs):
+            return MockResult()
+
+    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
+
+    extract_submission(sub)
+    
+    assert sub.status == "extracted"
+    assert "item" in sub.extracted_json
+    assert sub.extracted_json["item"]["topic"] == "Meals"
+
 def test_validation_works():
     # Valid
     sub1 = AdminSubmission(id="1", title="T", raw_text="R")

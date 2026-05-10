@@ -13,7 +13,12 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-load_dotenv(dotenv_path=REPO_ROOT / ".env", override=True)
+from pathlib import Path
+from dotenv import load_dotenv
+
+ROOT = Path(__file__).resolve().parents[1]
+load_dotenv(ROOT / ".env", override=True)
+print(f"Loaded .env from: {ROOT / '.env'}")
 
 from policy_engine.db import RealDictCursor, get_connection  # noqa: E402
 

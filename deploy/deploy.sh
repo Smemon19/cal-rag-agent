@@ -92,6 +92,7 @@ COMMON_ARGS=(
   --max-instances="$MAX_INSTANCES"
   --min-instances="$MIN_INSTANCES"
   --set-env-vars="GOOGLE_CLOUD_RUN=true,EMBEDDING_BACKEND=${EMBEDDING_BACKEND},VERTEX_PROJECT_ID=${VERTEX_PROJECT_ID},VERTEX_LOCATION=${VERTEX_LOCATION},VERTEX_EMBEDDING_MODEL=${VERTEX_EMBEDDING_MODEL},CAL_MODEL_NAME=${CAL_MODEL_NAME},BQ_PROJECT=${BQ_PROJECT},BQ_DATASET=${BQ_DATASET},BQ_TABLE=${BQ_TABLE},VECTOR_BACKEND=bigquery"
+  --set-secrets="DB_HOST=DB_HOST:latest,DB_NAME=DB_NAME:latest,DB_USER=DB_USER:latest,DB_PASSWORD=DB_PASSWORD:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,APP_SECRET_KEY=APP_SECRET_KEY:latest,APP_USERS=APP_USERS:latest"
 )
 if [[ -n "$SERVICE_ACCOUNT" ]]; then
   COMMON_ARGS+=(--service-account="$SERVICE_ACCOUNT")
@@ -109,8 +110,8 @@ echo "[info] Service account: $SA"
 URL=$(gcloud run services describe "$SERVICE" --region="$REGION" --format='value(status.url)')
 echo "[ok] Deployed: $URL"
 
-echo -n "[probe] /?healthz=1 -> "
-HC=$(curl -s -o /dev/null -w "%{http_code}" "$URL/?healthz=1" || true)
+echo -n "[probe] /health -> "
+HC=$(curl -s -o /dev/null -w "%{http_code}" "$URL/health" || true)
 echo "$HC"
 if [[ "$HC" != "200" ]]; then
   echo "[fail] Health probe returned $HC. Check logs and verify ADC/service account." >&2
