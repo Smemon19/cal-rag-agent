@@ -1,7 +1,7 @@
 import datetime
 import uuid
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Dict
 
 from adaptive_ingestion.policy_extractor import PolicyExtractor
@@ -43,6 +43,23 @@ def create_submission(title: str, raw_text: str, submitted_by: str | None = None
     _submissions[sub.id] = sub
     return sub
 
+def _candidate_to_dict(candidate: Any) -> Dict[str, Any]:
+    if hasattr(candidate, "model_dump"):  # Pydantic v2
+        return candidate.model_dump()
+
+    if hasattr(candidate, "dict"):  # Pydantic v1 fallback
+        return candidate.dict()
+
+    if is_dataclass(candidate):
+        return asdict(candidate)
+
+    if isinstance(candidate, dict):
+        return candidate
+
+    raise TypeError(
+        f"candidate_json must be a pydantic model, dataclass, or dict, got {type(candidate).__name__}"
+    )
+
 def extract_submission(submission: AdminSubmission) -> None:
     schema_dict = SchemaDictionary()
     # Force deterministic extraction by disabling LLM for speed/reliability in V1
@@ -56,7 +73,7 @@ def extract_submission(submission: AdminSubmission) -> None:
     )
     
     # Store the candidate as a dict
-    candidate_dict = asdict(result.payload.candidate_json)
+    candidate_dict = _candidate_to_dict(result.payload.candidate_json)
     
     submission.extracted_json = {"item": candidate_dict}
     
