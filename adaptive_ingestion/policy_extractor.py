@@ -435,6 +435,8 @@ Chunk text:
             return list_result
 
         # LLM-first semantic extraction path (grounded in chunk text).
+        self.fallback_used = False
+        self.fallback_reason = None
         if self.use_llm:
             try:
                 candidate = self._llm_extract(
@@ -462,6 +464,8 @@ Chunk text:
                 return ExtractionResult(payload=payload, confidence=candidate.confidence)
             except Exception as e:
                 # Safe fallback to deterministic extraction when LLM path fails.
+                self.fallback_used = True
+                self.fallback_reason = str(e)
                 print(f"[policy_extractor] LLM extraction failed; falling back. error={e}")
 
         chunk_type = self._classify_chunk(section_text)

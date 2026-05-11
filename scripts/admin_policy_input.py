@@ -73,6 +73,13 @@ def main():
         validate_submission(sub)
             
     print("\n--- Extraction Result ---")
+    
+    meta = sub.extracted_json.get("meta", {})
+    if meta.get("requested_llm") and meta.get("fallback_used"):
+        print("[!] LLM-assisted extraction was requested, but the LLM service was unavailable.")
+        print("[!] Falling back to strict deterministic extraction.")
+        print("[!] This may cause otherwise valid policies to be flagged as needs_clarification.\n")
+        
     print(f"Status: {sub.status}")
     print(f"Confidence: {sub.confidence:.2f}")
     

@@ -76,6 +76,12 @@ def extract_submission(submission: AdminSubmission, use_llm: bool = False) -> No
     candidate_dict = _candidate_to_dict(result.payload.candidate_json)
     
     submission.extracted_json = {"item": candidate_dict}
+    submission.extracted_json["meta"] = {
+        "requested_llm": use_llm,
+        "used_llm": use_llm and not getattr(extractor, "fallback_used", False),
+        "fallback_used": getattr(extractor, "fallback_used", False),
+        "fallback_reason": getattr(extractor, "fallback_reason", None)
+    }
     
     # Calculate confidence scoring
     score = 0.0
