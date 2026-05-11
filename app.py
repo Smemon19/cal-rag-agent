@@ -23,6 +23,11 @@ load_dotenv(dotenv_path=_ROOT / ".env", override=True)
 sys.path.insert(0, str(_ROOT))
 
 from policy_engine.service import answer_policy_question
+from adaptive_ingestion.admin_input_pipeline import (
+    create_submission, extract_submission, validate_submission,
+    generate_clarification_questions, preview_submission, publish_submission,
+    _submissions
+)
 
 # ── Auth config ───────────────────────────────────────────────────────────────
 # APP_USERS is a JSON string: {"username": "plaintext_password", ...}
@@ -126,3 +131,110 @@ async def ask(req: AskRequest, request: Request):
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+# ── Admin Routes ──────────────────────────────────────────────────────────────
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/login", status_code=302)
+    return HTMLResponse((PUBLIC_DIR / "admin.html").read_text(encoding="utf-8"))
+
+class ExtractRequest(BaseModel):
+    title: str
+    raw_text: str
+
+@app.post("/api/admin/extract")
+async def api_admin_extract(req: ExtractRequest, request: Request):
+    user = request.session.get("user")
+    if not user:
+        return JSONResponse({"error": "Not authenticated."}, status_code=401)
+    
+    sub = create_submission(req.title, req.raw_text, submitted_by=user)
+    extract_submission(sub, use_llm=True)
+    validate_submission(sub)
+    
+    questions = []
+    if sub.status == "needs_clarification":
+        questions = generate_clarification_questions(sub)
+        
+    return {
+        "id": sub.id,
+        "status": sub.status,
+        "confidence": sub.confidence,
+        "extracted_json": sub.extracted_json,
+        "questions": questions
+    }
+
+class ClarifyRequest(BaseModel):
+    id: str
+    clarification: str
+
+@app.post("/api/admin/clarify")
+async def api_admin_clarify(req: ClarifyRequest, request: Request):
+    if not request.session.get("user"):
+        return JSONResponse({"error": "Not authenticated."}, status_code=401)
+        
+    sub = _submissions.get(req.id)
+    if not sub:
+        return JSONResponse({"error": "Submission not found."}, status_code=404)
+        
+    sub.raw_text += f"\nClarification: {req.clarification}"
+    extract_submission(sub, use_llm=True)
+    validate_submission(sub)
+    
+    questions = []
+    if sub.status == "needs_clarification":
+        questions = generate_clarification_questions(sub)
+        
+    return {
+        "id": sub.id,
+        "status": sub.status,
+        "confidence": sub.confidence,
+        "extracted_json": sub.extracted_json,
+        "questions": questions
+    }
+
+class EditRequest(BaseModel):
+    id: str
+    edited_json: dict
+
+@app.post("/api/admin/preview")
+async def api_admin_preview(req: EditRequest, request: Request):
+    if not request.session.get("user"):
+        return JSONResponse({"error": "Not authenticated."}, status_code=401)
+        
+    sub = _submissions.get(req.id)
+    if not sub:
+        return JSONResponse({"error": "Submission not found."}, status_code=404)
+        
+    # Note: In a production app, the in-memory _submissions dict wouldn't persist 
+    # across restarts. This is acceptable for the V1 UI workflow prototype.
+    sub.extracted_json = req.edited_json
+    
+    preview_data = preview_submission(sub)
+    if not preview_data:
+        return JSONResponse({"error": "Could not generate preview."}, status_code=400)
+        
+    return preview_data
+
+@app.post("/api/admin/publish")
+async def api_admin_publish(req: EditRequest, request: Request):
+    if not request.session.get("user"):
+        return JSONResponse({"error": "Not authenticated."}, status_code=401)
+        
+    sub = _submissions.get(req.id)
+    if not sub:
+        return JSONResponse({"error": "Submission not found."}, status_code=404)
+        
+    sub.extracted_json = req.edited_json
+    validate_submission(sub)
+    
+    if sub.status in ("needs_clarification", "needs_review"):
+        return JSONResponse({"error": f"Cannot publish submission with status: {sub.status}"}, status_code=400)
+        
+    try:
+        policy_id = publish_submission(sub)
+        return {"policy_id": policy_id, "message": "Success"}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)

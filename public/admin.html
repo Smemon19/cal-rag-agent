@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin - Policy Badger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --navy:      #0f1729;
+      --accent:    #4f8ef7;
+      --surface:   #f7f8fc;
+      --card:      #ffffff;
+      --border:    #e4e8f0;
+      --text:      #1c2333;
+      --muted:     #8892a4;
+      --error:     #c0392b;
+      --error-bg:  #fff1f1;
+      --success:   #22c55e;
+      --success-bg:#f0fdf4;
+    }
+    body {
+      font-family: 'Inter', -apple-system, sans-serif;
+      background: var(--surface);
+      color: var(--text);
+      padding: 40px;
+    }
+    .container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: var(--card);
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.05);
+      padding: 30px;
+    }
+    h1 { font-size: 24px; margin-bottom: 20px; color: var(--navy); }
+    .form-group { margin-bottom: 20px; }
+    label { display: block; font-weight: 500; font-size: 14px; margin-bottom: 8px; }
+    input[type="text"], textarea {
+      width: 100%; padding: 12px; border: 1px solid var(--border); border-radius: 8px; font-family: inherit; font-size: 14px;
+    }
+    button {
+      background: var(--accent); color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: 500; cursor: pointer; transition: background 0.2s;
+    }
+    button:hover { background: #3a6fd4; }
+    button:disabled { background: var(--muted); cursor: not-allowed; }
+    
+    .section {
+      margin-top: 30px; padding-top: 30px; border-top: 1px solid var(--border); display: none;
+    }
+    .alert { padding: 12px; border-radius: 6px; margin-bottom: 20px; font-size: 14px; }
+    .alert-error { background: var(--error-bg); color: var(--error); border: 1px solid #fecaca; }
+    .alert-success { background: var(--success-bg); color: #166534; border: 1px solid #bbf7d0; }
+    .alert-warning { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
+
+    .questions-list { padding-left: 20px; margin-bottom: 15px; font-size: 14px; }
+    
+    pre { background: #f1f5f9; padding: 12px; border-radius: 6px; overflow-x: auto; font-size: 13px; margin-bottom: 15px; }
+
+    table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px; }
+    th, td { text-align: left; padding: 10px; border-bottom: 1px solid var(--border); }
+    th { width: 30%; color: var(--muted); font-weight: 500; }
+    .edit-input { width: 100%; padding: 6px; border: 1px solid var(--border); border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+      <h1>Admin Input Pipeline</h1>
+      <a href="/" style="color: var(--accent); text-decoration: none; font-size: 14px;">Back to Chat</a>
+    </div>
+
+    <!-- Step 1: Initial Input -->
+    <div id="step-1">
+      <div class="form-group">
+        <label>Policy Title</label>
+        <input type="text" id="title" placeholder="e.g., Remote Work Policy" />
+      </div>
+      <div class="form-group">
+        <label>Raw Policy Text</label>
+        <textarea id="raw-text" rows="6" placeholder="Paste the raw text of the policy here..."></textarea>
+      </div>
+      <button id="extract-btn" onclick="extractPolicy()">Extract Policy</button>
+      <div id="extract-loading" style="display:none; margin-top:10px; font-size:14px; color:var(--muted);">Processing LLM extraction...</div>
+    </div>
+
+    <!-- Feedback Area -->
+    <div id="feedback" style="margin-top: 20px;"></div>
+
+    <!-- Step 2: Clarification -->
+    <div id="step-clarify" class="section">
+      <div class="alert alert-warning">
+        <strong>Needs Clarification:</strong> The extraction engine needs more details before this can be published.
+      </div>
+      <ul id="clarify-questions" class="questions-list"></ul>
+      <div class="form-group">
+        <label>Provide Clarification</label>
+        <textarea id="clarification-text" rows="4" placeholder="Answer the questions above..."></textarea>
+      </div>
+      <button id="clarify-btn" onclick="submitClarification()">Submit Clarification</button>
+      <div id="clarify-loading" style="display:none; margin-top:10px; font-size:14px; color:var(--muted);">Re-extracting...</div>
+    </div>
+
+    <!-- Step 3: Review / Ready -->
+    <div id="step-ready" class="section">
+      <h3 style="margin-bottom: 15px;">Extracted Fields</h3>
+      <div id="review-alert" class="alert alert-warning" style="display:none;"></div>
+      
+      <table>
+        <tbody id="fields-table"></tbody>
+      </table>
+      
+      <div id="ready-actions" style="display:none;">
+        <button id="preview-btn" onclick="previewPolicy()">Generate Preview</button>
+        <div id="preview-loading" style="display:none; margin-top:10px; font-size:14px; color:var(--muted);">Simulating answer...</div>
+      </div>
+    </div>
+
+    <!-- Step 4: Preview & Publish -->
+    <div id="step-preview" class="section">
+      <h3 style="margin-bottom: 15px;">Simulated Chatbot Preview</h3>
+      <div style="background: var(--navy); color: #fff; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        <p style="font-size: 13px; color: #a8b8d8; margin-bottom: 8px;" id="preview-question"></p>
+        <div id="preview-answer" style="font-size: 14px; line-height: 1.6; white-space: pre-wrap;"></div>
+      </div>
+      <button id="publish-btn" onclick="publishPolicy()" style="background: #22c55e;">Publish to Database</button>
+      <div id="publish-loading" style="display:none; margin-top:10px; font-size:14px; color:var(--muted);">Publishing...</div>
+    </div>
+
+  </div>
+
+  <script>
+    let currentSubmissionId = null;
+    let currentExtractedJson = null;
+
+    const EDITABLE_FIELDS = [
+      "topic", "subtopic", "summary", "condition_text", 
+      "action_text", "approval_required", "approver", 
+      "exception_text", "source_quote"
+    ];
+
+    function showFeedback(msg, type) {
+      const fb = document.getElementById('feedback');
+      fb.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+    }
+
+    function hideFeedback() {
+      document.getElementById('feedback').innerHTML = '';
+    }
+
+    function hideAllSections() {
+      document.getElementById('step-clarify').style.display = 'none';
+      document.getElementById('step-ready').style.display = 'none';
+      document.getElementById('step-preview').style.display = 'none';
+    }
+
+    async function extractPolicy() {
+      const title = document.getElementById('title').value.trim();
+      const rawText = document.getElementById('raw-text').value.trim();
+      if (!title || !rawText) return alert("Title and raw text are required.");
+
+      hideFeedback();
+      hideAllSections();
+      document.getElementById('extract-btn').disabled = true;
+      document.getElementById('extract-loading').style.display = 'block';
+
+      try {
+        const res = await fetch('/api/admin/extract', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({title: title, raw_text: rawText})
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        
+        handleExtractionResult(data);
+      } catch (err) {
+        showFeedback(err.message, 'error');
+      } finally {
+        document.getElementById('extract-btn').disabled = false;
+        document.getElementById('extract-loading').style.display = 'none';
+      }
+    }
+
+    async function submitClarification() {
+      const clarText = document.getElementById('clarification-text').value.trim();
+      if (!clarText) return alert("Clarification text required.");
+
+      hideFeedback();
+      document.getElementById('clarify-btn').disabled = true;
+      document.getElementById('clarify-loading').style.display = 'block';
+
+      try {
+        const res = await fetch('/api/admin/clarify', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: currentSubmissionId, clarification: clarText})
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        
+        document.getElementById('clarification-text').value = '';
+        handleExtractionResult(data);
+      } catch (err) {
+        showFeedback(err.message, 'error');
+      } finally {
+        document.getElementById('clarify-btn').disabled = false;
+        document.getElementById('clarify-loading').style.display = 'none';
+      }
+    }
+
+    function handleExtractionResult(data) {
+      currentSubmissionId = data.id;
+      currentExtractedJson = data.extracted_json;
+      
+      hideAllSections();
+
+      if (data.extracted_json && data.extracted_json.meta && data.extracted_json.meta.fallback_used) {
+        showFeedback("LLM extraction was unavailable. Fell back to deterministic extraction.", "warning");
+      }
+
+      if (data.status === "needs_clarification") {
+        document.getElementById('step-clarify').style.display = 'block';
+        const qList = document.getElementById('clarify-questions');
+        qList.innerHTML = '';
+        if (data.questions && data.questions.length > 0) {
+          data.questions.forEach(q => {
+            const li = document.createElement('li');
+            li.textContent = q;
+            qList.appendChild(li);
+          });
+        } else {
+          qList.innerHTML = '<li>Unable to infer missing details. Please provide more context.</li>';
+        }
+      } 
+      else {
+        document.getElementById('step-ready').style.display = 'block';
+        renderFieldsTable(data.extracted_json.item);
+
+        const revAlert = document.getElementById('review-alert');
+        const readyActions = document.getElementById('ready-actions');
+
+        if (data.status === "needs_review") {
+          revAlert.style.display = 'block';
+          revAlert.innerHTML = `<strong>Needs Review:</strong> Please fill in any missing fields below. Publishing is blocked. Reason: ${data.extracted_json.item.reason_if_not_publishable || 'Incomplete structure.'}`;
+          readyActions.style.display = 'none';
+        } else {
+          revAlert.style.display = 'none';
+          readyActions.style.display = 'block';
+        }
+      }
+    }
+
+    function renderFieldsTable(item) {
+      const tbody = document.getElementById('fields-table');
+      tbody.innerHTML = '';
+
+      // Non-editable metadata
+      tbody.innerHTML += `
+        <tr><th>Chunk Type</th><td>${item.chunk_type || ''}</td></tr>
+        <tr><th>Confidence</th><td>${(item.confidence || 0).toFixed(2)}</td></tr>
+      `;
+
+      EDITABLE_FIELDS.forEach(field => {
+        const val = item[field] !== null && item[field] !== undefined ? item[field] : '';
+        tbody.innerHTML += `
+          <tr>
+            <th>${field}</th>
+            <td><input type="text" class="edit-input" data-field="${field}" value="${escapeHtml(String(val))}" /></td>
+          </tr>
+        `;
+      });
+    }
+
+    function gatherEditedJson() {
+      const edited = JSON.parse(JSON.stringify(currentExtractedJson));
+      document.querySelectorAll('.edit-input').forEach(input => {
+        const f = input.getAttribute('data-field');
+        let v = input.value.trim();
+        if (v === '') v = null;
+        if (v === 'true') v = true;
+        if (v === 'false') v = false;
+        edited.item[f] = v;
+      });
+      return edited;
+    }
+
+    async function previewPolicy() {
+      hideFeedback();
+      document.getElementById('preview-btn').disabled = true;
+      document.getElementById('preview-loading').style.display = 'block';
+
+      const editedJson = gatherEditedJson();
+
+      try {
+        const res = await fetch('/api/admin/preview', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: currentSubmissionId, edited_json: editedJson})
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        
+        document.getElementById('step-preview').style.display = 'block';
+        document.getElementById('preview-question').textContent = "Q: " + data.sample_question;
+        document.getElementById('preview-answer').textContent = data.simulated_answer;
+        
+        // Save current edits locally
+        currentExtractedJson = editedJson;
+        
+      } catch (err) {
+        showFeedback(err.message, 'error');
+      } finally {
+        document.getElementById('preview-btn').disabled = false;
+        document.getElementById('preview-loading').style.display = 'none';
+      }
+    }
+
+    async function publishPolicy() {
+      if (!confirm("Are you sure you want to publish this policy to the active database?")) return;
+
+      hideFeedback();
+      document.getElementById('publish-btn').disabled = true;
+      document.getElementById('publish-loading').style.display = 'block';
+
+      const editedJson = gatherEditedJson();
+
+      try {
+        const res = await fetch('/api/admin/publish', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({id: currentSubmissionId, edited_json: editedJson})
+        });
+        const data = await res.json();
+        if (data.error) throw new Error(data.error);
+        
+        showFeedback(`Success! Policy published. ID: ${data.policy_id}`, 'success');
+        hideAllSections();
+        document.getElementById('title').value = '';
+        document.getElementById('raw-text').value = '';
+        
+      } catch (err) {
+        showFeedback(err.message, 'error');
+      } finally {
+        document.getElementById('publish-btn').disabled = false;
+        document.getElementById('publish-loading').style.display = 'none';
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+    }
+  </script>
+</body>
+</html>
