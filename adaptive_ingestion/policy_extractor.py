@@ -39,7 +39,7 @@ class PolicyExtractor:
         self.extractor_version = extractor_version
         self.use_llm = (os.getenv("USE_LLM_SEMANTIC_EXTRACTION", "1").strip() != "0")
         self._llm_model = None
-        self._llm_model_name = (os.getenv("ADMIN_LLM_MODEL") or os.getenv("SEMANTIC_EXTRACT_MODEL") or os.getenv("CAL_MODEL_NAME") or "gemini-2.5-flash").strip()
+        self._llm_model_name = (os.getenv("ADMIN_LLM_MODEL") or "gemini-2.5-flash").strip()
 
     @staticmethod
     def _summarize(text: str, max_len: int = 220) -> str:
