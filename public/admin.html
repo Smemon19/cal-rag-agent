@@ -90,17 +90,16 @@
     <!-- Feedback Area -->
     <div id="feedback" style="margin-top: 20px;"></div>
 
-    <!-- Step 2: Clarification -->
-    <div id="step-clarify" class="section">
-      <div class="alert alert-warning">
-        <strong>Needs Clarification:</strong> The extraction engine needs more details before this can be published.
+    <!-- Clarification Warning Area -->
+    <div id="step-clarify" style="display:none; margin-top: 20px; padding: 15px; background: #fffbeb; border: 1px solid #fde68a; border-radius: 8px;">
+      <div style="color: #b45309; font-weight: 500; margin-bottom: 10px;">
+        ⚠️ The AI thinks this may need more detail. You can either add clarification or manually edit the fields below.
       </div>
-      <ul id="clarify-questions" class="questions-list"></ul>
+      <ul id="clarify-questions" class="questions-list" style="color: #b45309; margin-bottom: 15px;"></ul>
       <div class="form-group">
-        <label>Provide Clarification</label>
-        <textarea id="clarification-text" rows="4" placeholder="Answer the questions above..."></textarea>
+        <textarea id="clarification-text" rows="3" placeholder="Answer the questions above if you want to re-run extraction..." style="border-color: #fde68a;"></textarea>
       </div>
-      <button id="clarify-btn" onclick="submitClarification()">Submit Clarification</button>
+      <button id="clarify-btn" onclick="submitClarification()" style="background: #f59e0b; color: white;">Re-run with clarification</button>
       <div id="clarify-loading" style="display:none; margin-top:10px; font-size:14px; color:var(--muted);">Re-extracting...</div>
     </div>
 
@@ -222,6 +221,12 @@
         showFeedback("LLM extraction was unavailable. Fell back to deterministic extraction.", "warning");
       }
 
+      // Always show the editable fields table
+      document.getElementById('step-ready').style.display = 'block';
+      renderFieldsTable(data.extracted_json.item);
+      const readyActions = document.getElementById('ready-actions');
+      readyActions.style.display = 'block';
+
       if (data.status === "needs_clarification") {
         document.getElementById('step-clarify').style.display = 'block';
         const qList = document.getElementById('clarify-questions');
@@ -236,21 +241,13 @@
           qList.innerHTML = '<li>Unable to infer missing details. Please provide more context.</li>';
         }
       } 
-      else {
-        document.getElementById('step-ready').style.display = 'block';
-        renderFieldsTable(data.extracted_json.item);
-
-        const revAlert = document.getElementById('review-alert');
-        const readyActions = document.getElementById('ready-actions');
-
-        if (data.status === "needs_review") {
-          revAlert.style.display = 'block';
-          revAlert.innerHTML = `<strong>Needs Review:</strong> Please fill in any missing fields below. Publishing is blocked. Reason: ${data.extracted_json.item.reason_if_not_publishable || 'Incomplete structure.'}`;
-          readyActions.style.display = 'none';
-        } else {
-          revAlert.style.display = 'none';
-          readyActions.style.display = 'block';
-        }
+      
+      const revAlert = document.getElementById('review-alert');
+      if (data.status === "needs_review") {
+        revAlert.style.display = 'block';
+        revAlert.innerHTML = `<strong>Needs Review:</strong> Please review and fill in any missing fields below. Reason: ${data.extracted_json.item.reason_if_not_publishable || 'Incomplete structure.'}`;
+      } else {
+        revAlert.style.display = 'none';
       }
     }
 

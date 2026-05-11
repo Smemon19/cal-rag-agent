@@ -199,6 +199,16 @@ class EditRequest(BaseModel):
     id: str
     edited_json: dict
 
+def _validate_admin_policy_item(item: dict) -> list[str]:
+    missing = []
+    if not item.get("topic"):
+        missing.append("topic")
+    if not item.get("source_quote"):
+        missing.append("source_quote")
+    if not item.get("action_text") and not item.get("condition_text"):
+        missing.append("action_text OR condition_text")
+    return missing
+
 @app.post("/api/admin/preview")
 async def api_admin_preview(req: EditRequest, request: Request):
     if not request.session.get("user"):
@@ -211,6 +221,15 @@ async def api_admin_preview(req: EditRequest, request: Request):
     # Note: In a production app, the in-memory _submissions dict wouldn't persist 
     # across restarts. This is acceptable for the V1 UI workflow prototype.
     sub.extracted_json = req.edited_json
+    
+    # Safe item extraction for validation
+    item = req.edited_json.get("item", {}) if isinstance(req.edited_json, dict) else {}
+    if not item and "topic" in req.edited_json:
+        item = req.edited_json
+        
+    missing_fields = _validate_admin_policy_item(item)
+    if missing_fields:
+        return JSONResponse({"error": f"Missing required fields: {', '.join(missing_fields)}"}, status_code=400)
     
     preview_data = preview_submission(sub)
     if not preview_data:
@@ -228,10 +247,16 @@ async def api_admin_publish(req: EditRequest, request: Request):
         return JSONResponse({"error": "Submission not found."}, status_code=404)
         
     sub.extracted_json = req.edited_json
-    validate_submission(sub)
     
-    if sub.status in ("needs_clarification", "needs_review"):
-        return JSONResponse({"error": f"Cannot publish submission with status: {sub.status}"}, status_code=400)
+    # Final gate validation
+    item = req.edited_json.get("item", {}) if isinstance(req.edited_json, dict) else {}
+    if not item and "topic" in req.edited_json:
+        item = req.edited_json
+        
+    missing_fields = _validate_admin_policy_item(item)
+    if missing_fields:
+        return JSONResponse({"error": f"Cannot publish. Missing required fields: {', '.join(missing_fields)}"}, status_code=400)
+
         
     try:
         policy_id = publish_submission(sub)
