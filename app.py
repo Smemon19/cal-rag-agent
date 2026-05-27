@@ -34,8 +34,8 @@ from adaptive_ingestion.admin_input_pipeline import (
 from policy_engine.auth_db import (
     authenticate_user, update_last_login, create_user,
     get_user_by_username, get_current_session_user, require_roles,
-    require_login, list_users_for_admin, list_companies_for_admin,
-    create_company, create_managed_user, reset_managed_user_password,
+    require_login, list_users_for_admin,
+    create_managed_user, reset_managed_user_password,
     deactivate_managed_user, reactivate_managed_user, verify_user_password
 )
 from policy_engine.db import run_query, execute
@@ -100,7 +100,7 @@ def _seed_super_admin():
         logging.error(f"Error checking existing seed super admin: {str(e)}")
         return
 
-    company_name = os.environ.get("SEED_COMPANY_NAME", "Default Company")
+    company_name = os.environ.get("SEED_COMPANY_NAME", "Raymond Global")
     try:
         # Check or create default company
         company_rows = run_query("SELECT id FROM companies WHERE name = %s LIMIT 1", (company_name,))
@@ -391,27 +391,21 @@ async def api_auth_me(request: Request):
     return user
 
 # ── Password Change Routes ────────────────────────────────────────────────────
+_CHANGE_PW_PAGE = (PUBLIC_DIR / "change_password.html").read_text(encoding="utf-8")
+
+def _change_pw_error(msg: str) -> HTMLResponse:
+    html = _CHANGE_PW_PAGE.replace(
+        "<!--ERROR-->",
+        f'<div class="error-box">{msg}</div>'
+    )
+    return HTMLResponse(html, status_code=400)
+
 @app.get("/change-password", response_class=HTMLResponse)
 async def change_password_page(request: Request):
     user = get_current_session_user(request)
     if not user:
         return RedirectResponse("/login", status_code=302)
-
-    change_html = (PUBLIC_DIR / "change_password.html")
-    if change_html.exists():
-        return HTMLResponse(change_html.read_text(encoding="utf-8"))
-
-    # Simple fallback HTML if file is missing
-    fallback = """
-        <html><body><h2>Change Password Required</h2>
-        <form method='POST' action='/change-password'>
-            <input type='password' name='current_password' placeholder='Current Password' required><br>
-            <input type='password' name='new_password' placeholder='New Password' required><br>
-            <input type='password' name='confirm_password' placeholder='Confirm New Password' required><br>
-            <button type='submit'>Change Password</button>
-        </form></body></html>
-        """
-    return HTMLResponse(fallback)
+    return HTMLResponse(_CHANGE_PW_PAGE)
 
 @app.post("/change-password")
 async def change_password_post(
@@ -425,30 +419,31 @@ async def change_password_post(
         return RedirectResponse("/login", status_code=302)
 
     if new_password != confirm_password:
-        return HTMLResponse("Passwords do not match. <a href='/change-password'>Try again</a>", status_code=400)
+        return _change_pw_error("Passwords do not match. Please try again.")
+
+    if len(new_password) < 8:
+        return _change_pw_error("New password must be at least 8 characters.")
 
     user_id = user["user_id"]
     if user_id == "legacy":
-        return HTMLResponse("Legacy users cannot change password via this interface.", status_code=400)
+        return _change_pw_error("Legacy users cannot change their password here.")
 
-    # verify user and update
     try:
         rows = run_query("SELECT password_hash FROM users WHERE id = %s", (user_id,))
         if not rows:
             return RedirectResponse("/login", status_code=302)
 
-        hashed = rows[0]["password_hash"]
-        if not verify_user_password(current_password, hashed):
-            return HTMLResponse("Incorrect current password. <a href='/change-password'>Try again</a>", status_code=400)
+        if not verify_user_password(current_password, rows[0]["password_hash"]):
+            return _change_pw_error("Incorrect temporary password. Please try again.")
 
         new_hashed = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
         execute("UPDATE users SET password_hash = %s, must_reset_password = false WHERE id = %s", (new_hashed, user_id))
 
-        # update session
         request.session["must_reset_password"] = False
-        return RedirectResponse("/", status_code=302)
+        role = user.get("role")
+        return RedirectResponse("/admin" if role in ("super_admin", "manager_admin") else "/", status_code=302)
     except Exception as e:
-        return HTMLResponse(f"Error: {str(e)}", status_code=500)
+        return _change_pw_error("Something went wrong. Please try again.")
 
 # ── User & Company Management ─────────────────────────────────────────────────
 @app.get("/api/admin/users")
@@ -465,7 +460,6 @@ class CreateUserReq(BaseModel):
     password: str
     role: str
     email: Optional[str] = None
-    company_id: Optional[str] = None
 
 @app.post("/api/admin/users")
 async def api_admin_create_user(req: CreateUserReq, request: Request):
@@ -476,7 +470,6 @@ async def api_admin_create_user(req: CreateUserReq, request: Request):
             username=req.username,
             password=req.password,
             role=req.role,
-            company_id=req.company_id,
             email=req.email,
             must_reset_password=True
         )
@@ -522,26 +515,3 @@ async def api_admin_reactivate_user(user_id: str, request: Request):
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
 
-@app.get("/api/admin/companies")
-async def api_admin_get_companies(request: Request):
-    user = require_roles(request, {"super_admin"})
-    try:
-        companies = list_companies_for_admin(user)
-        return {"companies": companies}
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-class CreateCompanyReq(BaseModel):
-    name: str
-    slug: Optional[str] = None
-
-@app.post("/api/admin/companies")
-async def api_admin_create_company(req: CreateCompanyReq, request: Request):
-    user = require_roles(request, {"super_admin"})
-    try:
-        created = create_company(user, req.name, req.slug)
-        return created
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)

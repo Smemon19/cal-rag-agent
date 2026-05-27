@@ -119,76 +119,51 @@ def log_audit_action(actor_user_id: Optional[str], target_user_id: Optional[str]
     """
     execute(sql, (actor_user_id, target_user_id, action, json.dumps(details)))
 
+def _get_raymond_global_company_id() -> Optional[str]:
+    rows = run_query("SELECT id FROM companies WHERE name = 'Raymond Global' LIMIT 1", ())
+    return str(rows[0]["id"]) if rows else None
+
 def list_users_for_admin(current_user: dict) -> list[dict]:
     role = current_user.get("role")
     if role == "super_admin":
         sql = """
-            SELECT u.id, u.username, u.email, u.role, u.is_active, u.company_id, c.name as company_name
+            SELECT u.id, u.username, u.email, u.role, u.is_active
             FROM users u
-            LEFT JOIN companies c ON u.company_id = c.id
         """
         return run_query(sql)
     elif role == "manager_admin":
-        company_id = current_user.get("company_id")
         sql = """
-            SELECT u.id, u.username, u.email, u.role, u.is_active, u.company_id, c.name as company_name
+            SELECT u.id, u.username, u.email, u.role, u.is_active
             FROM users u
-            LEFT JOIN companies c ON u.company_id = c.id
-            WHERE u.company_id = %s AND u.role = 'employee'
+            WHERE u.role = 'employee'
         """
-        return run_query(sql, (company_id,))
+        return run_query(sql)
     else:
         raise HTTPException(status_code=403, detail="Forbidden")
-
-def list_companies_for_admin(current_user: dict) -> list[dict]:
-    if current_user.get("role") != "super_admin":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    return run_query("SELECT id, name, slug, is_active FROM companies")
-
-def create_company(current_user: dict, name: str, slug: Optional[str] = None) -> dict:
-    if current_user.get("role") != "super_admin":
-        raise HTTPException(status_code=403, detail="Forbidden")
-    
-    # Simple slug generation if none provided
-    if not slug:
-        slug = name.lower().replace(" ", "-")
-        import re
-        slug = re.sub(r'[^a-z0-9\-]', '', slug)
-    
-    try:
-        rows = run_query("INSERT INTO companies (name, slug) VALUES (%s, %s) RETURNING id", (name, slug))
-        company_id = rows[0]["id"]
-        log_audit_action(current_user["user_id"], None, "create_company", {"name": name, "slug": slug})
-        return {"id": company_id, "name": name, "slug": slug}
-    except Exception as e:
-        if "unique constraint" in str(e).lower():
-            raise HTTPException(status_code=400, detail="Company with this slug already exists.")
-        raise HTTPException(status_code=500, detail="Database error creating company.")
 
 def create_managed_user(
     current_user: dict,
     username: str,
     password: str,
     role: str,
-    company_id: Optional[str] = None,
     email: Optional[str] = None,
     must_reset_password: bool = True
 ) -> dict:
     curr_role = current_user.get("role")
-    curr_company = current_user.get("company_id")
-    
+
     if curr_role == "employee":
         raise HTTPException(status_code=403, detail="Forbidden")
-        
+
     if curr_role == "manager_admin":
         if role != "employee":
             raise HTTPException(status_code=403, detail="Manager can only create employee users.")
-        company_id = curr_company
-        
+
     if curr_role == "super_admin":
         if role not in ["employee", "manager_admin"]:
             raise HTTPException(status_code=403, detail="Cannot create super_admin through this endpoint.")
-            
+
+    company_id = _get_raymond_global_company_id()
+
     try:
         user_id = create_user(
             username=username,
@@ -201,8 +176,8 @@ def create_managed_user(
         )
         log_audit_action(current_user["user_id"], user_id, "create_user", {"username": username, "role": role})
         return {
-            "id": user_id, "username": username, "role": role, 
-            "company_id": company_id, "email": email, "is_active": True
+            "id": user_id, "username": username, "role": role,
+            "email": email, "is_active": True
         }
     except Exception as e:
         if "unique constraint" in str(e).lower():
