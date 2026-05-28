@@ -127,17 +127,22 @@ def list_users_for_admin(current_user: dict) -> list[dict]:
     role = current_user.get("role")
     if role == "super_admin":
         sql = """
-            SELECT u.id, u.username, u.email, u.role, u.is_active
+            SELECT u.id, u.username, u.email, u.role, u.is_active,
+                   creator.username AS created_by_username
             FROM users u
+            LEFT JOIN users creator ON u.created_by_user_id = creator.id
+            ORDER BY u.role, u.username
         """
         return run_query(sql)
     elif role == "manager_admin":
+        user_id = current_user.get("user_id")
         sql = """
             SELECT u.id, u.username, u.email, u.role, u.is_active
             FROM users u
-            WHERE u.role = 'employee'
+            WHERE u.created_by_user_id = %s AND u.role = 'employee'
+            ORDER BY u.username
         """
-        return run_query(sql)
+        return run_query(sql, (user_id,))
     else:
         raise HTTPException(status_code=403, detail="Forbidden")
 

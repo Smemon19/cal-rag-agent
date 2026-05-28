@@ -499,6 +499,36 @@
     .users-table tbody tr:hover { background: var(--surface); }
     .users-table tbody tr.inactive { opacity: 0.5; }
 
+    /* ── Scrollable table container ── */
+    .table-scroll-wrap {
+      max-height: 530px; /* ~10 rows */
+      overflow-y: auto;
+      border-radius: 0 0 10px 10px;
+    }
+
+    .table-scroll-wrap::-webkit-scrollbar { width: 6px; }
+    .table-scroll-wrap::-webkit-scrollbar-track { background: transparent; }
+    .table-scroll-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+    .table-scroll-wrap::-webkit-scrollbar-thumb:hover { background: var(--muted); }
+
+    .users-table thead th {
+      position: sticky;
+      top: 0;
+      background: var(--card);
+      z-index: 2;
+      box-shadow: 0 1px 0 var(--border);
+    }
+
+    .added-by-cell {
+      font-size: 12.5px;
+      color: var(--muted);
+    }
+
+    .added-by-cell .by-name {
+      color: var(--text);
+      font-weight: 500;
+    }
+
     .role-pill {
       font-size: 11.5px;
       font-weight: 600;
@@ -775,19 +805,22 @@
           <span id="user-count" style="font-size:12px; font-weight:400; color:var(--muted); margin-left:6px;"></span>
         </div>
 
-        <table class="users-table">
-          <thead>
-            <tr>
-              <th>Username</th>
-              <th>Role</th>
-              <th>Status</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody id="users-tbody">
-            <tr><td colspan="4" class="empty-state">Loading users…</td></tr>
-          </tbody>
-        </table>
+        <div class="table-scroll-wrap">
+          <table class="users-table">
+            <thead>
+              <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th id="added-by-header" style="display:none;">Added By</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="users-tbody">
+              <tr><td colspan="4" class="empty-state">Loading users…</td></tr>
+            </tbody>
+          </table>
+        </div>
       </div>
 
     </div><!-- /tab-users -->
@@ -1144,22 +1177,31 @@
         const tbody = document.getElementById('users-tbody');
         tbody.innerHTML = '';
 
-        const users = data.users || [];
+        const users       = data.users || [];
+        const isSuperAdmin = currentUser?.role === 'super_admin';
+        const colSpan     = isSuperAdmin ? 5 : 4;
+
+        // Show "Added By" column only for super admin
+        document.getElementById('added-by-header').style.display = isSuperAdmin ? '' : 'none';
+
         document.getElementById('user-count').textContent = users.length
           ? `(${users.length} ${users.length === 1 ? 'member' : 'members'})`
           : '';
 
         if (!users.length) {
-          tbody.innerHTML = '<tr><td colspan="4" class="empty-state">No users found.</td></tr>';
+          const emptyMsg = isSuperAdmin
+            ? 'No users found.'
+            : 'You haven\'t added any employees yet. Use the form above to create one.';
+          tbody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-state">${emptyMsg}</td></tr>`;
           return;
         }
 
         users.forEach(u => {
-          const isSelf      = u.id === currentUser?.user_id;
-          const isSuper     = u.role === 'super_admin';
-          const canManage   = !isSelf && !isSuper;
+          const isSelf    = u.id === currentUser?.user_id;
+          const isSuper   = u.role === 'super_admin';
+          const canManage = !isSelf && !isSuper;
 
-          const statusHtml  = `<span class="status-pill">
+          const statusHtml = `<span class="status-pill">
             <span class="status-dot ${u.is_active ? 'active' : 'inactive'}"></span>
             ${u.is_active ? 'Active' : 'Inactive'}
           </span>`;
@@ -1173,11 +1215,19 @@
               }
             </div>` : '<span style="color:var(--muted); font-size:12px;">—</span>';
 
+          const addedByCell = isSuperAdmin
+            ? `<td class="added-by-cell">${u.created_by_username
+                ? `<span class="by-name">${escapeHtml(u.created_by_username)}</span>`
+                : '<span style="color:var(--muted);">—</span>'
+              }</td>`
+            : '';
+
           const row = document.createElement('tr');
           if (!u.is_active) row.classList.add('inactive');
           row.innerHTML = `
             <td style="font-weight:500;">${escapeHtml(u.username)}${isSelf ? ' <span style="font-size:11px;color:var(--muted);">(you)</span>' : ''}</td>
             <td>${rolePillHtml(u.role)}</td>
+            ${addedByCell}
             <td>${statusHtml}</td>
             <td>${actions}</td>
           `;
