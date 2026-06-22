@@ -26,14 +26,8 @@ venv.bak/
 __pycache__/
 *.py[cod]
 
-# Skip local datasets, embeddings, and diagnostics not needed in App Engine
-chroma_db/
-chroma_db_053/
-docs/
-
 # Skip auxiliary tooling and packaging artifacts
 installer/
-deploy/
 *.log
 *.tmp
 *.temp

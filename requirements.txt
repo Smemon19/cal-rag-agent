@@ -22,7 +22,3 @@ python-docx
 pdfplumber
 PyMuPDF
 PyYAML
-
-# Optional admin/dev tools
-streamlit
-google-cloud-secret-manager

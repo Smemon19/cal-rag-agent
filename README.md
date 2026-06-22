@@ -2,7 +2,7 @@
 
 Policy Badger is a structured policy question-answering app backed by PostgreSQL. It answers user questions by planning a constrained database search, building safe SQL, retrieving rows from `policies_v2`, and formatting a grounded answer from those rows.
 
-The current system is centered on the new `policy_engine/` and `adaptive_ingestion/` packages. Older Chroma/vector RAG and Streamlit-only artifacts have been moved into `legacy_archive/` for reference.
+The current system is centered on the `policy_engine/` and `adaptive_ingestion/` packages.
 
 ## Core Flow
 
@@ -34,13 +34,11 @@ Main implementation:
 ├── requirements.txt
 ├── adaptive_ingestion/
 ├── policy_engine/
-│   ├── migrations/
-│   └── web/
+│   └── migrations/
 ├── pdf_loader/
 ├── public/
 ├── scripts/
-├── tests/
-└── legacy_archive/
+└── tests/
 ```
 
 ## Web App
@@ -183,7 +181,3 @@ Compile active Python modules:
 ```bash
 python -m compileall -q app.py policy_engine adaptive_ingestion pdf_loader scripts tests
 ```
-
-## Legacy Archive
-
-Legacy or generated artifacts were moved to `legacy_archive/` instead of deleted. See `CLEANUP_NOTES.md` for the full list and rationale.

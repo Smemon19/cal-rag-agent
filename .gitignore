@@ -99,9 +99,6 @@ dmypy.json
 ehthumbs.db
 Thumbs.db
 
-# ChromaDB
-chroma_db/
-
 # Logs
 *.log
 
@@ -111,27 +108,3 @@ chroma_db/
 tmp_*.json
 
 .pip-cache/
-
-# Local/generated tool artifacts
-.firebase/
-.local-bin/
-.sfdx/
-
-# Generated diagnostics and large artifacts under docs
-docs/diag_run_*/
-docs/diag_run_ibc/
-docs/diag_run_iebc/
-docs/diag_run_2bonus/
-docs/**/images/
-docs/**/renders/
-docs/**/ocr/
-docs/**/merged/
-docs/**/text/
-docs/**/report/
-
-# Local PDFs (keep versioned docs/** markdown, ignore raw PDFs)
-docs/pdfs/chroma_db.zip
-chroma_db/
-chroma_db.zip
-chroma_db/
-docs/pdfs/*.pdf
