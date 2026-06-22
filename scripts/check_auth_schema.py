@@ -2,10 +2,11 @@
 import sys
 import os
 
-# Append the root dir to path so we can import policy_engine
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Append src to path so we can import policy_badger.
+ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT_DIR, "src"))
 
-from policy_engine.db import run_query
+from policy_badger.engine.db import run_query
 
 def main():
     print("Checking database schema for Auth (Phase 3)...\n")

@@ -10,6 +10,7 @@ RUN apt-get update \
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/app/src \
     PORT=8080
 
 WORKDIR /app
@@ -21,4 +22,4 @@ COPY . /app
 
 EXPOSE 8080
 
-CMD ["sh", "-c", "uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}"]
+CMD ["sh", "-c", "uvicorn policy_badger.web.app:app --host 0.0.0.0 --port ${PORT:-8080}"]

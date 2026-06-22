@@ -1,7 +1,7 @@
 import bcrypt
 from typing import Optional, Dict, Set
 from fastapi import Request, HTTPException
-from policy_engine.db import run_query, execute
+from policy_badger.engine.db import run_query, execute
 
 def get_user_by_username(username: str) -> Optional[Dict]:
     """
@@ -62,7 +62,7 @@ def create_user(
         ) RETURNING id
     """
     # use transaction to get the RETURNING id and commit
-    from policy_engine.db import transaction
+    from policy_badger.engine.db import transaction
     with transaction() as cur:
         cur.execute(sql, (
             username, email, password_hash, role,

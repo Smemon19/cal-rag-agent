@@ -1,11 +1,15 @@
 import sys
 import json
 import os
+from pathlib import Path
 
-# Add project root to path if needed so imports work
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+# Add src to path if needed so imports work.
+REPO_ROOT = Path(__file__).resolve().parents[1]
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
-from adaptive_ingestion.admin_input_pipeline import (
+from policy_badger.ingestion.admin_input_pipeline import (
     create_submission,
     extract_submission,
     validate_submission,

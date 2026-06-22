@@ -11,12 +11,12 @@ import time
 from pathlib import Path
 from typing import Any
 
-from adaptive_ingestion.pipeline import AdaptiveIngestionPipeline, IngestionDocumentInput
-from policy_engine.db import run_query
-from policy_engine.formatter import format_answer
-from policy_engine.planner import fetch_db_context, plan_search
-from policy_engine.query_builder import build_query_from_spec, build_text_fallback_query, relaxed_specs_in_order
-from policy_engine.synonyms import expand_question
+from policy_badger.ingestion.pipeline import AdaptiveIngestionPipeline, IngestionDocumentInput
+from policy_badger.engine.db import run_query
+from policy_badger.engine.formatter import format_answer
+from policy_badger.engine.planner import fetch_db_context, plan_search
+from policy_badger.engine.query_builder import build_query_from_spec, build_text_fallback_query, relaxed_specs_in_order
+from policy_badger.engine.synonyms import expand_question
 
 # Cache the DB context so we don't hit the DB on every single question.
 _db_context_cache: str = ""

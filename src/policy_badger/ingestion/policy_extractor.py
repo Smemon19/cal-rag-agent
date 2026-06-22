@@ -8,8 +8,8 @@ import re
 from dataclasses import dataclass
 from uuid import uuid4
 
-from adaptive_ingestion.contracts import CandidateJson, FieldMappingValue, StagingPayload, UnmappedConcept
-from adaptive_ingestion.schema_dictionary import SchemaDictionary
+from policy_badger.ingestion.contracts import CandidateJson, FieldMappingValue, StagingPayload, UnmappedConcept
+from policy_badger.ingestion.schema_dictionary import SchemaDictionary
 
 
 @dataclass

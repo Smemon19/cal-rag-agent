@@ -1,9 +1,4 @@
-"""
-PostgreSQL access for policy_engine using psycopg2.
-Loads credentials from environment (.env via python-dotenv).
-
-Install driver if needed: pip install psycopg2-binary
-"""
+"""PostgreSQL access for Policy Badger using psycopg2."""
 
 import os
 from pathlib import Path
@@ -18,12 +13,8 @@ except Exception:  # pragma: no cover
     psycopg2 = None  # type: ignore
     RealDictCursor = None  # type: ignore
 
-from pathlib import Path
-from dotenv import load_dotenv
-
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / ".env", override=True)
-print(f"Loaded .env from: {ROOT / '.env'}")
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(_REPO_ROOT / ".env", override=True)
 
 
 def get_connection():
@@ -32,7 +23,7 @@ def get_connection():
     Caller is responsible for closing (or use run_query which closes internally).
     """
     if psycopg2 is None:
-        raise RuntimeError("psycopg2 is required for policy_engine.db. Install psycopg2-binary.")
+        raise RuntimeError("psycopg2 is required for policy_badger.engine.db. Install psycopg2-binary.")
 
     host = (os.environ.get("DB_HOST") or "").strip()
     if not host:

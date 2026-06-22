@@ -7,8 +7,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from adaptive_ingestion.migration_generator import MigrationGenerator
-from adaptive_ingestion.schema_planner import classify_migration
+from policy_badger.ingestion.migration_generator import MigrationGenerator
+from policy_badger.ingestion.schema_planner import classify_migration
 
 
 def test_classify_migration_policy() -> None:

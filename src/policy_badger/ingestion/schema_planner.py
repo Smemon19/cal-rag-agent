@@ -6,8 +6,8 @@ import json
 from dataclasses import asdict, dataclass
 from uuid import uuid4
 
-from adaptive_ingestion.gap_detector import Gap
-from policy_engine.db import execute
+from policy_badger.ingestion.gap_detector import Gap
+from policy_badger.engine.db import execute
 
 
 def classify_migration(gap_type: str, concept: str) -> str:

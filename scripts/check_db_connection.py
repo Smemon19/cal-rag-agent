@@ -10,17 +10,13 @@ from dotenv import load_dotenv
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-if str(REPO_ROOT) not in sys.path:
-    sys.path.insert(0, str(REPO_ROOT))
+SRC_ROOT = REPO_ROOT / "src"
+if str(SRC_ROOT) not in sys.path:
+    sys.path.insert(0, str(SRC_ROOT))
 
-from pathlib import Path
-from dotenv import load_dotenv
+load_dotenv(REPO_ROOT / ".env", override=True)
 
-ROOT = Path(__file__).resolve().parents[1]
-load_dotenv(ROOT / ".env", override=True)
-print(f"Loaded .env from: {ROOT / '.env'}")
-
-from policy_engine.db import RealDictCursor, get_connection  # noqa: E402
+from policy_badger.engine.db import RealDictCursor, get_connection  # noqa: E402
 
 
 def _print_config() -> None:

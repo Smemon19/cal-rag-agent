@@ -2,7 +2,7 @@
 
 Policy Badger is a structured policy question-answering app backed by PostgreSQL. It answers user questions by planning a constrained database search, building safe SQL, retrieving rows from `policies_v2`, and formatting a grounded answer from those rows.
 
-The current system is centered on the `policy_engine/` and `adaptive_ingestion/` packages.
+The current system is centered on the `src/policy_badger/engine/` and `src/policy_badger/ingestion/` packages.
 
 ## Core Flow
 
@@ -16,27 +16,29 @@ User question
 
 Main implementation:
 
-- `app.py` is the authenticated FastAPI web app.
-- `policy_engine/service.py` orchestrates question answering.
-- `policy_engine/planner.py` asks the LLM for a JSON search spec only.
-- `policy_engine/query_builder.py` builds parameterized SQL from validated fields and filters.
-- `policy_engine/db.py` connects to PostgreSQL using `DB_*` environment variables.
-- `policy_engine/formatter.py` writes the final answer using only retrieved rows.
-- `adaptive_ingestion/` ingests policy documents, stages extracted policy candidates, proposes schema changes, and publishes accepted rows.
+- `src/policy_badger/web/app.py` is the authenticated FastAPI web app.
+- `src/policy_badger/engine/service.py` orchestrates question answering.
+- `src/policy_badger/engine/planner.py` asks the LLM for a JSON search spec only.
+- `src/policy_badger/engine/query_builder.py` builds parameterized SQL from validated fields and filters.
+- `src/policy_badger/engine/db.py` connects to PostgreSQL using `DB_*` environment variables.
+- `src/policy_badger/engine/formatter.py` writes the final answer using only retrieved rows.
+- `src/policy_badger/ingestion/` ingests policy documents, stages extracted policy candidates, proposes schema changes, and publishes accepted rows.
 
 ## Repository Structure
 
 ```text
 .
-├── app.py
 ├── apphosting.yaml
 ├── Dockerfile
 ├── requirements.txt
-├── adaptive_ingestion/
-├── policy_engine/
-│   └── migrations/
-├── pdf_loader/
-├── public/
+├── src/
+│   └── policy_badger/
+│       ├── engine/
+│       │   └── migrations/
+│       ├── ingestion/
+│       ├── pdf/
+│       └── web/
+│           └── static/
 ├── scripts/
 └── tests/
 ```
@@ -46,14 +48,14 @@ Main implementation:
 Run locally:
 
 ```bash
-uvicorn app:app --reload
+PYTHONPATH=src uvicorn policy_badger.web.app:app --reload
 ```
 
 The FastAPI app provides:
 
 - `GET /login` and `POST /login` for session login.
 - `GET /logout` to clear the session.
-- `GET /` for the web UI in `public/index.html`.
+- `GET /` for the web UI in `src/policy_badger/web/static/index.html`.
 - `POST /ask` for authenticated policy questions.
 - `GET /health` for health checks.
 
@@ -77,7 +79,7 @@ The policy engine is intentionally split into small responsibilities:
 The main public API is:
 
 ```python
-from policy_engine.service import answer_policy_question
+from policy_badger.engine.service import answer_policy_question
 
 result = answer_policy_question("What is the PTO approval policy?")
 ```
@@ -103,13 +105,13 @@ Document input
 
 Important files:
 
-- `adaptive_ingestion/pipeline.py` wires the ingestion workflow.
-- `adaptive_ingestion/policy_extractor.py` extracts structured candidate policy JSON.
-- `adaptive_ingestion/schema_dictionary.py` loads canonical policy field definitions.
-- `adaptive_ingestion/gap_detector.py` and `schema_planner.py` identify schema gaps.
-- `adaptive_ingestion/migration_generator.py` and `migration_applier.py` generate and apply approved schema changes.
-- `adaptive_ingestion/publisher.py` validates staged records and publishes them to `policies_v2`.
-- `policy_engine/migrations/0001_adaptive_ingestion_foundation.sql` creates the ingestion support tables.
+- `src/policy_badger/ingestion/pipeline.py` wires the ingestion workflow.
+- `src/policy_badger/ingestion/policy_extractor.py` extracts structured candidate policy JSON.
+- `src/policy_badger/ingestion/schema_dictionary.py` loads canonical policy field definitions.
+- `src/policy_badger/ingestion/gap_detector.py` and `schema_planner.py` identify schema gaps.
+- `src/policy_badger/ingestion/migration_generator.py` and `migration_applier.py` generate and apply approved schema changes.
+- `src/policy_badger/ingestion/publisher.py` validates staged records and publishes them to `policies_v2`.
+- `src/policy_badger/engine/migrations/0001_adaptive_ingestion_foundation.sql` creates the ingestion support tables.
 
 Run adaptive ingestion from the CLI:
 
@@ -163,7 +165,7 @@ docker run --env-file .env -p 8080:8080 policy-badger
 The `Dockerfile` runs:
 
 ```bash
-uvicorn app:app --host 0.0.0.0 --port ${PORT:-8080}
+uvicorn policy_badger.web.app:app --host 0.0.0.0 --port ${PORT:-8080}
 ```
 
 `apphosting.yaml` contains the App Hosting / Cloud Run-style runtime and secret configuration.
@@ -179,5 +181,5 @@ pytest -q
 Compile active Python modules:
 
 ```bash
-python -m compileall -q app.py policy_engine adaptive_ingestion pdf_loader scripts tests
+python -m compileall -q src scripts tests
 ```

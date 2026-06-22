@@ -10,7 +10,7 @@ import re
 from copy import deepcopy
 from typing import Any
 
-from policy_engine.planner import ALLOWED_FILTER_KEYS, ALLOWED_REQUESTED_FIELDS
+from policy_badger.engine.planner import ALLOWED_FILTER_KEYS, ALLOWED_REQUESTED_FIELDS
 
 DEFAULT_LIMIT = 20
 COMPLETE_LIST_LIMIT = 80

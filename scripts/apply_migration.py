@@ -3,9 +3,10 @@ import sys
 import psycopg2
 from dotenv import load_dotenv
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, os.path.join(ROOT_DIR, "src"))
 
-from policy_engine.db import get_connection
+from policy_badger.engine.db import get_connection
 
 def main():
     if len(sys.argv) < 2:

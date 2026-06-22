@@ -4,10 +4,10 @@ import json
 from dataclasses import asdict, dataclass, field, is_dataclass
 from typing import Any, Dict
 
-from adaptive_ingestion.policy_extractor import PolicyExtractor
-from adaptive_ingestion.schema_dictionary import SchemaDictionary
-from policy_engine.formatter import format_answer
-from policy_engine.db import execute, run_query
+from policy_badger.ingestion.policy_extractor import PolicyExtractor
+from policy_badger.ingestion.schema_dictionary import SchemaDictionary
+from policy_badger.engine.formatter import format_answer
+from policy_badger.engine.db import execute, run_query
 
 @dataclass
 class AdminSubmission:

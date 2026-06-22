@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from policy_engine import formatter
+from policy_badger.engine import formatter
 
 
 class _FakeMessage:

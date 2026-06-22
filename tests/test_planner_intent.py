@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from policy_engine import planner
+from policy_badger.engine import planner
 
 
 class _FakeMessage:

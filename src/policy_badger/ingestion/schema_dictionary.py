@@ -8,7 +8,7 @@ from typing import Any
 
 import yaml
 
-from policy_engine.db import run_query
+from policy_badger.engine.db import run_query
 
 
 @dataclass(frozen=True)

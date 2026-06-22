@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
-from policy_engine.db import execute, transaction
+from policy_badger.engine.db import execute, transaction
 
 
 ALLOWED_CLASSES = {"safe_auto", "approval_required"}

@@ -1,6 +1,6 @@
 """
 Policy Badger — FastAPI server with session-based auth.
-Run locally: uvicorn app:app --reload
+Run locally: uvicorn policy_badger.web.app:app --reload
 """
 
 from __future__ import annotations
@@ -19,26 +19,26 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
-# Load .env using explicit path so uvicorn always finds it regardless of CWD
-_ROOT = Path(__file__).resolve().parent
-load_dotenv(dotenv_path=_ROOT / ".env", override=True)
-sys.path.insert(0, str(_ROOT))
+# Load .env using explicit path so uvicorn always finds it regardless of CWD.
+_APP_DIR = Path(__file__).resolve().parent
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+load_dotenv(dotenv_path=_REPO_ROOT / ".env", override=True)
 
-from policy_engine.service import answer_policy_question
-from adaptive_ingestion.admin_input_pipeline import (
+from policy_badger.engine.service import answer_policy_question
+from policy_badger.ingestion.admin_input_pipeline import (
     create_submission, extract_submission, validate_submission,
     generate_clarification_questions, preview_submission, publish_submission,
     _submissions
 )
 
-from policy_engine.auth_db import (
+from policy_badger.engine.auth_db import (
     authenticate_user, update_last_login, create_user,
     get_user_by_username, get_current_session_user, require_roles,
     require_login, list_users_for_admin,
     create_managed_user, reset_managed_user_password,
     deactivate_managed_user, reactivate_managed_user, verify_user_password
 )
-from policy_engine.db import run_query, execute
+from policy_badger.engine.db import run_query, execute
 
 # ── Production safety guard ──────────────────────────────────────────────────
 ENABLE_LEGACY_APP_USERS_AUTH = os.environ.get("ENABLE_LEGACY_APP_USERS_AUTH", "false").lower() == "true"
@@ -79,8 +79,7 @@ def _check_password(username: str, plain: str) -> bool:
 app = FastAPI(title="Policy Badger", docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 8)  # 8-hour session
 
-PUBLIC_DIR = _ROOT / "public"
-PUBLIC_DIR.mkdir(exist_ok=True)
+PUBLIC_DIR = _APP_DIR / "static"
 
 # ── Seeding Logic ─────────────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -107,7 +106,7 @@ def _seed_super_admin():
         if company_rows:
             company_id = company_rows[0]["id"]
         else:
-            from policy_engine.db import transaction
+            from policy_badger.engine.db import transaction
             with transaction() as cur:
                 cur.execute("INSERT INTO companies (name) VALUES (%s) RETURNING id", (company_name,))
                 rows = cur.fetchall()
@@ -514,4 +513,3 @@ async def api_admin_reactivate_user(user_id: str, request: Request):
         raise he
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-

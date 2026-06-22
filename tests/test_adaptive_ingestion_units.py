@@ -8,18 +8,18 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from adaptive_ingestion.contracts import (
+from policy_badger.ingestion.contracts import (
     CandidateJson,
     FieldMappingValue,
     StagingPayload,
     UnmappedConcept,
 )
-from adaptive_ingestion.gap_detector import GapDetector
-from adaptive_ingestion.policy_extractor import PolicyExtractor
-from adaptive_ingestion.schema_dictionary import SchemaDictionary
-from adaptive_ingestion.schema_planner import SchemaPlanner, classify_migration
-from adaptive_ingestion.section_chunker import SectionChunker
-from adaptive_ingestion.pipeline import AdaptiveIngestionPipeline, IngestionDocumentInput
+from policy_badger.ingestion.gap_detector import GapDetector
+from policy_badger.ingestion.policy_extractor import PolicyExtractor
+from policy_badger.ingestion.schema_dictionary import SchemaDictionary
+from policy_badger.ingestion.schema_planner import SchemaPlanner, classify_migration
+from policy_badger.ingestion.section_chunker import SectionChunker
+from policy_badger.ingestion.pipeline import AdaptiveIngestionPipeline, IngestionDocumentInput
 
 
 def test_section_chunker_splits_markdown() -> None:
@@ -199,17 +199,16 @@ def test_pipeline_extracts_pdf_content_with_ocr(monkeypatch, tmp_path: Path) -> 
     pdf_path = tmp_path / "policy.pdf"
     pdf_path.write_bytes(b"%PDF-1.4 fake")
 
-    fake_pdf_loader = types.ModuleType("pdf_loader.pdf_loader")
+    fake_pdf_loader = types.ModuleType("policy_badger.pdf.pdf_loader")
 
     def fake_process_pdf(_pdf_path, _output_json, _image_dir, chunk_size=500):  # noqa: ARG001
         return [{"text": "Scanned policy text from image OCR."}]
 
     fake_pdf_loader.process_pdf = fake_process_pdf
-    monkeypatch.setitem(sys.modules, "pdf_loader.pdf_loader", fake_pdf_loader)
+    monkeypatch.setitem(sys.modules, "policy_badger.pdf.pdf_loader", fake_pdf_loader)
 
     pipe = AdaptiveIngestionPipeline()
     text = pipe._extract_content_for_input(
         IngestionDocumentInput(source_uri=f"file://{pdf_path}", content="")
     )
     assert "OCR" in text
-

@@ -1,5 +1,5 @@
 import pytest
-from adaptive_ingestion.admin_input_pipeline import (
+from policy_badger.ingestion.admin_input_pipeline import (
     AdminSubmission,
     create_submission,
     extract_submission,
@@ -34,7 +34,7 @@ def test_extraction_works(monkeypatch):
         def extract(self, **kwargs):
             return MockResult()
 
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
 
     extract_submission(sub)
     
@@ -64,7 +64,7 @@ def test_extraction_works_with_dict(monkeypatch):
         def extract(self, **kwargs):
             return MockResult()
 
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
 
     extract_submission(sub)
     
@@ -92,7 +92,7 @@ def test_preview_works(monkeypatch):
     sub.extracted_json = {"item": {"topic": "Meals", "action_text": "Eat", "source_quote": "Q"}}
     
     # Mock format_answer
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.format_answer", lambda q, r: f"Mock Answer for {q}")
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.format_answer", lambda q, r: f"Mock Answer for {q}")
     
     preview = preview_submission(sub, "test question")
     assert preview["simulated_answer"] == "Mock Answer for test question"
@@ -113,8 +113,8 @@ def test_publish_inserts_correctly(monkeypatch):
     def mock_execute(sql, params):
         pass
     
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.run_query", mock_run_query)
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.execute", mock_execute)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.run_query", mock_run_query)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.execute", mock_execute)
     
     policy_id = publish_submission(sub)
     
@@ -143,7 +143,7 @@ def test_clear_input_does_not_trigger_clarification():
     assert sub.status != "needs_clarification"
 
 def test_clarification_improves_confidence(monkeypatch):
-    from adaptive_ingestion.admin_input_pipeline import generate_clarification_questions
+    from policy_badger.ingestion.admin_input_pipeline import generate_clarification_questions
     
     sub = AdminSubmission(id="1", title="T", raw_text="Vague policy.")
     sub.extracted_json = {"item": {"topic": "T"}}
@@ -174,7 +174,7 @@ def test_clarification_improves_confidence(monkeypatch):
         def extract(self, **kwargs):
             return MockResult()
 
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
     
     extract_submission(sub)
     
@@ -215,8 +215,8 @@ def test_publish_submission_stores_audit_record(monkeypatch):
         called_params.append(params)
         return 1
 
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.run_query", mock_run_query)
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.execute", mock_execute)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.run_query", mock_run_query)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.execute", mock_execute)
     
     # We can simulate replacing an older policy
     sub.replaces_policy_id = "old_policy_456"
@@ -245,7 +245,7 @@ def test_publish_submission_stores_audit_record(monkeypatch):
     assert audit_args[9] == "old_policy_456"
 
 def test_extraction_with_llm_flag(monkeypatch):
-    from adaptive_ingestion.admin_input_pipeline import extract_submission, create_submission
+    from policy_badger.ingestion.admin_input_pipeline import extract_submission, create_submission
     
     sub = create_submission("LLM Policy", "Testing LLM flag.")
     
@@ -269,7 +269,7 @@ def test_extraction_with_llm_flag(monkeypatch):
                 payload = MockPayload()
             return MockResult()
 
-    monkeypatch.setattr("adaptive_ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.PolicyExtractor", MockExtractor)
 
     extract_submission(sub, use_llm=True)
     

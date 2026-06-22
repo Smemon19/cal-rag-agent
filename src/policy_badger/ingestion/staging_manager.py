@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from uuid import uuid4
 
-from adaptive_ingestion.contracts import StagingPayload
-from policy_engine.db import execute, run_query
+from policy_badger.ingestion.contracts import StagingPayload
+from policy_badger.engine.db import execute, run_query
 
 
 class StagingManager:

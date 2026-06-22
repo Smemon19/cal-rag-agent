@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import uuid4
 
-from policy_engine.db import execute
+from policy_badger.engine.db import execute
 
 
 class AuditLogger:

@@ -9,19 +9,19 @@ from tempfile import TemporaryDirectory
 from urllib.parse import unquote
 from uuid import uuid4
 
-from adaptive_ingestion.document_ingestor import DocumentIngestor
-from adaptive_ingestion.foundation import ensure_foundation_schema
-from adaptive_ingestion.gap_detector import GapDetector
-from adaptive_ingestion.migration_applier import MigrationApplier
-from adaptive_ingestion.migration_generator import MigrationGenerator
-from adaptive_ingestion.policy_extractor import PolicyExtractor
-from adaptive_ingestion.publisher import NonPublishableChunk, Publisher
-from adaptive_ingestion.schema_dictionary import SchemaDictionary
-from adaptive_ingestion.schema_introspector import SchemaIntrospector
-from adaptive_ingestion.schema_planner import SchemaPlanner
-from adaptive_ingestion.section_chunker import SectionChunker
-from adaptive_ingestion.staging_manager import StagingManager
-from policy_engine.db import execute, run_query
+from policy_badger.ingestion.document_ingestor import DocumentIngestor
+from policy_badger.ingestion.foundation import ensure_foundation_schema
+from policy_badger.ingestion.gap_detector import GapDetector
+from policy_badger.ingestion.migration_applier import MigrationApplier
+from policy_badger.ingestion.migration_generator import MigrationGenerator
+from policy_badger.ingestion.policy_extractor import PolicyExtractor
+from policy_badger.ingestion.publisher import NonPublishableChunk, Publisher
+from policy_badger.ingestion.schema_dictionary import SchemaDictionary
+from policy_badger.ingestion.schema_introspector import SchemaIntrospector
+from policy_badger.ingestion.schema_planner import SchemaPlanner
+from policy_badger.ingestion.section_chunker import SectionChunker
+from policy_badger.ingestion.staging_manager import StagingManager
+from policy_badger.engine.db import execute, run_query
 
 
 @dataclass
@@ -50,7 +50,7 @@ class AdaptiveIngestionPipeline:
         self.bq_mirror = None
 
     def _get_bq_mirror(self):
-        from adaptive_ingestion.bigquery_mirror import BigQueryMirror
+        from policy_badger.ingestion.bigquery_mirror import BigQueryMirror
 
         if self.bq_mirror is None:
             self.bq_mirror = BigQueryMirror()
@@ -78,7 +78,7 @@ class AdaptiveIngestionPipeline:
 
         suffix = file_path.suffix.lower()
         if suffix == ".pdf":
-            from pdf_loader.pdf_loader import process_pdf
+            from policy_badger.pdf.pdf_loader import process_pdf
 
             with TemporaryDirectory() as tmp:
                 tmp_path = Path(tmp)

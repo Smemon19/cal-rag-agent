@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from policy_engine.query_builder import COMPLETE_LIST_LIMIT, DEFAULT_LIMIT, build_query_from_spec
+from policy_badger.engine.query_builder import COMPLETE_LIST_LIMIT, DEFAULT_LIMIT, build_query_from_spec
 
 
 def _base_spec() -> dict:

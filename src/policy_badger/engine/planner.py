@@ -384,7 +384,7 @@ def fetch_db_context() -> str:
     Returns an empty string if the DB is unreachable or empty.
     """
     try:
-        from policy_engine.db import run_query
+        from policy_badger.engine.db import run_query
 
         count_rows = run_query("SELECT COUNT(*) AS n FROM policies_v2")
         total = int((count_rows[0].get("n") or 0)) if count_rows else 0

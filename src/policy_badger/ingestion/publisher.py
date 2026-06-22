@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import json
 
-from adaptive_ingestion.audit_logger import AuditLogger
-from adaptive_ingestion.contracts import CandidateJson
-from policy_engine.db import run_query, transaction
+from policy_badger.ingestion.audit_logger import AuditLogger
+from policy_badger.ingestion.contracts import CandidateJson
+from policy_badger.engine.db import run_query, transaction
 
 
 class NonPublishableChunk(Exception):

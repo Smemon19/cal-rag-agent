@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from policy_engine import service
-from policy_engine.synonyms import expand_question
+from policy_badger.engine import service
+from policy_badger.engine.synonyms import expand_question
 
 
 def test_client_dinner_expands_to_meal_and_expense_terms() -> None:

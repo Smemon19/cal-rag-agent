@@ -9,11 +9,11 @@ Before deploying the Cloud Run service, ensure the schema is up to date in your 
 1. Connect to your Cloud SQL instance using the Cloud SQL Auth Proxy.
 2. Apply the foundational auth migration:
    ```bash
-   psql -h 127.0.0.1 -d policy-badger -U postgres -f policy_engine/migrations/0003_auth_and_roles_foundation.sql
+   psql -h 127.0.0.1 -d policy-badger -U postgres -f src/policy_badger/engine/migrations/0003_auth_and_roles_foundation.sql
    ```
 3. Apply the audit log migration:
    ```bash
-   psql -h 127.0.0.1 -d policy-badger -U postgres -f policy_engine/migrations/0004_user_management_audit.sql
+   psql -h 127.0.0.1 -d policy-badger -U postgres -f src/policy_badger/engine/migrations/0004_user_management_audit.sql
    ```
 
 ## 2. Set Up Secret Manager

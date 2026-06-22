@@ -7,7 +7,7 @@ from collections import Counter, defaultdict
 from dataclasses import dataclass
 from typing import Any
 
-from adaptive_ingestion.schema_dictionary import SchemaDictionary
+from policy_badger.ingestion.schema_dictionary import SchemaDictionary
 
 
 @dataclass

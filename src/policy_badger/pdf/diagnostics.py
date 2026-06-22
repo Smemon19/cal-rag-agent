@@ -1,10 +1,10 @@
 """Diagnostics for PDF ingestion artifacts.
 
-Given a diagnostic directory produced by pdf_loader.pdf_loader, summarize per-page
+Given a diagnostic directory produced by policy_badger.pdf.pdf_loader, summarize per-page
 extraction coverage and write optional missing-line reports.
 
 Usage:
-    python -m pdf_loader.diagnostics --diag-dir /abs/path/to/diag_run [--report-dir /abs/path/to/diag_run/report]
+    python -m policy_badger.pdf.diagnostics --diag-dir /abs/path/to/diag_run [--report-dir /abs/path/to/diag_run/report]
 
 Outputs:
     - Prints a Markdown table with per-page stats to stdout
@@ -123,7 +123,7 @@ def analyze_page(diag_dir: Path, page: int, report_dir: Path | None) -> Dict[str
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Summarize PDF ingestion diagnostics")
-    ap.add_argument("--diag-dir", required=True, type=Path, help="Diagnostic directory produced by pdf_loader.pdf_loader")
+    ap.add_argument("--diag-dir", required=True, type=Path, help="Diagnostic directory produced by policy_badger.pdf.pdf_loader")
     ap.add_argument("--report-dir", type=Path, default=None, help="Optional directory to write missing-line reports")
     args = ap.parse_args()
 

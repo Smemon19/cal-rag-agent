@@ -1,2 +1,3 @@
 [tool.pytest.ini_options]
 norecursedirs = [".git", ".venv", "venv", ".venv_local"]
+pythonpath = ["src"]
