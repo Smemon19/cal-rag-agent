@@ -1,880 +1,265 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Admin Portal — Policy Badger</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --navy:       #0f1729;
-      --accent:     #4f8ef7;
-      --surface:    #f7f8fc;
-      --card:       #ffffff;
-      --border:     #e4e8f0;
-      --text:       #1c2333;
-      --muted:      #8892a4;
-      --error:      #c0392b;
-      --error-bg:   #fff1f1;
-      --error-border:#ffd5d5;
-      --success:    #16a34a;
-      --success-bg: #f0fdf4;
-      --warn-bg:    #fffbeb;
-      --warn-border:#fde68a;
-      --warn-text:  #92400e;
-    }
-
-    html, body {
-      height: 100%;
-      font-family: 'Inter', -apple-system, sans-serif;
-      background: var(--surface);
-      color: var(--text);
-      font-size: 14px;
-    }
-
-    /* ── Header ── */
-    .site-header {
-      position: sticky;
-      top: 0;
-      z-index: 100;
-      background: var(--card);
-      border-bottom: 1px solid var(--border);
-      height: 64px;
-      display: flex;
-      align-items: center;
-      padding: 0 40px;
-      justify-content: space-between;
-    }
-
-    .header-logo {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .header-logo .icon {
-      width: 38px; height: 38px;
-      background: linear-gradient(135deg, #4f8ef7 0%, #7c5be6 100%);
-      border-radius: 10px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 18px;
-    }
-
-    .header-logo .wordmark { line-height: 1.2; }
-    .header-logo .wordmark strong { font-size: 15px; font-weight: 600; color: var(--navy); display: block; }
-    .header-logo .wordmark span  { font-size: 12px; color: var(--muted); }
-
-    .header-right {
-      display: flex;
-      align-items: center;
-      gap: 18px;
-    }
-
-    .role-badge {
-      font-size: 11.5px;
-      font-weight: 600;
-      padding: 3px 10px;
-      border-radius: 99px;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-    }
-    .role-badge.super-admin  { background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; }
-    .role-badge.manager-admin{ background:#f5f3ff; color:#6d28d9; border:1px solid #ddd6fe; }
-    .role-badge.employee     { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; }
-
-    .header-link {
-      font-size: 13.5px;
-      text-decoration: none;
-      color: var(--muted);
-      transition: color 0.15s;
-    }
-    .header-link:hover { color: var(--text); }
-    .header-link.primary { color: var(--accent); }
-    .header-link.primary:hover { color: #3a6fd4; }
-
-    /* ── Tab Bar ── */
-    .tab-bar {
-      background: var(--card);
-      border-bottom: 1px solid var(--border);
-      padding: 0 40px;
-      display: flex;
-      gap: 0;
-    }
-
-    .tab-btn {
-      background: none;
-      border: none;
-      border-bottom: 2.5px solid transparent;
-      padding: 14px 20px;
-      font-size: 13.5px;
-      font-weight: 500;
-      color: var(--muted);
-      cursor: pointer;
-      transition: color 0.15s, border-color 0.15s;
-      margin-bottom: -1px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    .tab-btn .tab-icon { font-size: 15px; }
-
-    .tab-btn:hover { color: var(--text); }
-
-    .tab-btn.active {
-      color: var(--navy);
-      font-weight: 600;
-      border-bottom-color: var(--accent);
-    }
-
-    /* ── Main ── */
-    .main {
-      max-width: 860px;
-      margin: 0 auto;
-      padding: 36px 40px 60px;
-    }
-
-    .tab-panel { display: none; }
-    .tab-panel.active { display: block; }
-
-    /* ── Cards ── */
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 28px;
-      margin-bottom: 20px;
-    }
-
-    .card-title {
-      font-size: 15px;
-      font-weight: 600;
-      color: var(--navy);
-      margin-bottom: 20px;
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
-
-    /* ── Step Tracker ── */
-    .step-tracker {
-      display: flex;
-      align-items: center;
-      margin-bottom: 28px;
-    }
-
-    .step-item {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      flex: 1;
-    }
-
-    .step-item:last-child { flex: 0; }
-
-    .step-circle {
-      width: 28px; height: 28px;
-      border-radius: 50%;
-      border: 2px solid var(--border);
-      background: var(--card);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--muted);
-      flex-shrink: 0;
-      transition: all 0.2s;
-    }
-
-    .step-circle.active { border-color: var(--accent); background: var(--accent); color: #fff; }
-    .step-circle.done   { border-color: #16a34a; background: #16a34a; color: #fff; }
-
-    .step-label {
-      font-size: 12px;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-
-    .step-label.active { color: var(--navy); font-weight: 600; }
-    .step-label.done   { color: #16a34a; }
-
-    .step-line {
-      flex: 1;
-      height: 2px;
-      background: var(--border);
-      margin: 0 8px;
-      transition: background 0.2s;
-    }
-
-    .step-line.done { background: #16a34a; }
-
-    /* ── Form Elements ── */
-    .form-group { margin-bottom: 18px; }
-
-    label.field-label {
-      display: block;
-      font-size: 13px;
-      font-weight: 500;
-      color: var(--text);
-      margin-bottom: 6px;
-    }
-
-    label.field-label .optional {
-      font-weight: 400;
-      color: var(--muted);
-      font-size: 12px;
-      margin-left: 4px;
-    }
-
-    input[type="text"],
-    input[type="password"],
-    input[type="email"],
-    textarea,
-    select {
-      width: 100%;
-      border: 1.5px solid var(--border);
-      border-radius: 10px;
-      padding: 10px 14px;
-      font-size: 14px;
-      font-family: inherit;
-      color: var(--text);
-      background: var(--surface);
-      outline: none;
-      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
-    }
-
-    input:focus, textarea:focus, select:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(79,142,247,0.12);
-      background: #fff;
-    }
-
-    textarea { resize: vertical; min-height: 120px; line-height: 1.6; }
-
-    /* ── Buttons ── */
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 10px 20px;
-      border-radius: 8px;
-      font-size: 13.5px;
-      font-weight: 600;
-      font-family: inherit;
-      border: none;
-      cursor: pointer;
-      transition: background 0.15s, opacity 0.15s;
-    }
-
-    .btn-primary   { background: var(--navy); color: #fff; }
-    .btn-primary:hover { background: #1a2540; }
-
-    .btn-accent    { background: var(--accent); color: #fff; }
-    .btn-accent:hover { background: #3a6fd4; }
-
-    .btn-success   { background: #16a34a; color: #fff; }
-    .btn-success:hover { background: #15803d; }
-
-    .btn-warn      { background: #f59e0b; color: #fff; }
-    .btn-warn:hover { background: #d97706; }
-
-    .btn-sm {
-      padding: 5px 12px;
-      font-size: 12px;
-      border-radius: 6px;
-    }
-
-    .btn-ghost {
-      background: var(--surface);
-      color: var(--text);
-      border: 1px solid var(--border);
-    }
-    .btn-ghost:hover { background: var(--border); }
-
-    .btn-danger-ghost {
-      background: var(--error-bg);
-      color: var(--error);
-      border: 1px solid var(--error-border);
-    }
-    .btn-danger-ghost:hover { background: #fee2e2; }
-
-    .btn:disabled { opacity: 0.45; cursor: not-allowed; }
-
-    /* ── Alerts ── */
-    .alert {
-      padding: 12px 16px;
-      border-radius: 10px;
-      font-size: 13.5px;
-      margin-bottom: 18px;
-      line-height: 1.5;
-    }
-    .alert-error   { background: var(--error-bg);   color: var(--error);  border: 1px solid var(--error-border); }
-    .alert-success { background: var(--success-bg); color: #166534;       border: 1px solid #bbf7d0; }
-    .alert-warning { background: var(--warn-bg);    color: var(--warn-text); border: 1px solid var(--warn-border); }
-    .alert-info    { background: #eff6ff;            color: #1e40af;       border: 1px solid #bfdbfe; }
-
-    /* ── Loading spinner ── */
-    .loading-row {
-      display: none;
-      align-items: center;
-      gap: 10px;
-      margin-top: 12px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .spinner {
-      width: 16px; height: 16px;
-      border: 2px solid var(--border);
-      border-top-color: var(--accent);
-      border-radius: 50%;
-      animation: spin 0.7s linear infinite;
-      flex-shrink: 0;
-    }
-
-    @keyframes spin { to { transform: rotate(360deg); } }
-
-    /* ── Clarification box ── */
-    .clarify-card {
-      display: none;
-      background: var(--warn-bg);
-      border: 1px solid var(--warn-border);
-      border-radius: 12px;
-      padding: 20px;
-      margin-bottom: 20px;
-    }
-
-    .clarify-card .clarify-title {
-      font-weight: 600;
-      color: var(--warn-text);
-      margin-bottom: 10px;
-      font-size: 13.5px;
-    }
-
-    .clarify-card ul {
-      padding-left: 18px;
-      margin-bottom: 14px;
-      color: var(--warn-text);
-      font-size: 13px;
-      line-height: 1.7;
-    }
-
-    /* ── Fields table ── */
-    .fields-section { display: none; }
-
-    .fields-table {
-      width: 100%;
-      border-collapse: collapse;
-      margin-bottom: 20px;
-    }
-
-    .fields-table th, .fields-table td {
-      padding: 10px 12px;
-      text-align: left;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
-
-    .fields-table th {
-      width: 28%;
-      font-size: 12.5px;
-      font-weight: 500;
-      color: var(--muted);
-      white-space: nowrap;
-    }
-
-    .fields-table .meta-val {
-      font-size: 13px;
-      color: var(--text);
-    }
-
-    .edit-input {
-      width: 100%;
-      padding: 7px 10px;
-      border: 1.5px solid var(--border);
-      border-radius: 7px;
-      font-size: 13px;
-      font-family: inherit;
-      color: var(--text);
-      background: var(--surface);
-      transition: border-color 0.15s, box-shadow 0.15s;
-    }
-
-    .edit-input:focus {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(79,142,247,0.1);
-      background: #fff;
-      outline: none;
-    }
-
-    /* ── Preview card ── */
-    .preview-section { display: none; }
-
-    .preview-box {
-      background: var(--navy);
-      border-radius: 12px;
-      padding: 20px 22px;
-      margin-bottom: 20px;
-    }
-
-    .preview-q {
-      font-size: 12.5px;
-      color: #7c9cc8;
-      margin-bottom: 10px;
-      font-style: italic;
-    }
-
-    .preview-a {
-      font-size: 13.5px;
-      color: #e8edf5;
-      line-height: 1.7;
-      white-space: pre-wrap;
-    }
-
-    /* ── Confidence pill ── */
-    .confidence-pill {
-      display: inline-block;
-      font-size: 12px;
-      font-weight: 600;
-      padding: 2px 10px;
-      border-radius: 99px;
-    }
-
-    .conf-high   { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
-    .conf-medium { background: #fffbeb; color: #b45309; border: 1px solid #fde68a; }
-    .conf-low    { background: var(--error-bg); color: var(--error); border: 1px solid var(--error-border); }
-
-    /* ── Users tab ── */
-    .create-user-grid {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 16px;
-    }
-
-    @media (max-width: 600px) {
-      .create-user-grid { grid-template-columns: 1fr; }
-    }
-
-    .user-form-footer {
-      margin-top: 6px;
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .inline-msg {
-      font-size: 13px;
-      display: none;
-    }
-    .inline-msg.ok  { color: #16a34a; }
-    .inline-msg.err { color: var(--error); }
-
-    /* ── Users table ── */
-    .users-table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-
-    .users-table th {
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      padding: 10px 14px;
-      border-bottom: 2px solid var(--border);
-      text-align: left;
-    }
-
-    .users-table td {
-      padding: 12px 14px;
-      border-bottom: 1px solid var(--border);
-      vertical-align: middle;
-    }
-
-    .users-table tbody tr:last-child td { border-bottom: none; }
-    .users-table tbody tr:hover { background: var(--surface); }
-    .users-table tbody tr.inactive { opacity: 0.5; }
-
-    /* ── Scrollable table container ── */
-    .table-scroll-wrap {
-      max-height: 530px; /* ~10 rows */
-      overflow-y: auto;
-      border-radius: 0 0 10px 10px;
-    }
-
-    .table-scroll-wrap::-webkit-scrollbar { width: 6px; }
-    .table-scroll-wrap::-webkit-scrollbar-track { background: transparent; }
-    .table-scroll-wrap::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
-    .table-scroll-wrap::-webkit-scrollbar-thumb:hover { background: var(--muted); }
-
-    .users-table thead th {
-      position: sticky;
-      top: 0;
-      background: var(--card);
-      z-index: 2;
-      box-shadow: 0 1px 0 var(--border);
-    }
-
-    .added-by-cell {
-      font-size: 12.5px;
-      color: var(--muted);
-    }
-
-    .added-by-cell .by-name {
-      color: var(--text);
-      font-weight: 500;
-    }
-
-    .role-pill {
-      font-size: 11.5px;
-      font-weight: 600;
-      padding: 3px 9px;
-      border-radius: 99px;
-      display: inline-block;
-    }
-
-    .role-pill.employee      { background:#eff6ff; color:#1d4ed8; border:1px solid #bfdbfe; }
-    .role-pill.manager-admin { background:#f5f3ff; color:#6d28d9; border:1px solid #ddd6fe; }
-    .role-pill.super-admin   { background:#fff7ed; color:#c2410c; border:1px solid #fed7aa; }
-
-    .status-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 5px;
-      font-size: 12px;
-      font-weight: 500;
-    }
-
-    .status-dot {
-      width: 7px; height: 7px;
-      border-radius: 50%;
-    }
-
-    .status-dot.active   { background: #16a34a; }
-    .status-dot.inactive { background: var(--muted); }
-
-    .action-row { display: flex; gap: 6px; align-items: center; }
-
-    .empty-state {
-      padding: 40px 20px;
-      text-align: center;
-      color: var(--muted);
-      font-size: 13.5px;
-    }
-
-    /* ── Toast ── */
-    #toast-container {
-      position: fixed;
-      top: 20px; right: 20px;
-      z-index: 9999;
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-      pointer-events: none;
-    }
-
-    .toast {
-      background: var(--navy);
-      color: #fff;
-      padding: 12px 18px;
-      border-radius: 10px;
-      font-size: 13.5px;
-      font-weight: 500;
-      box-shadow: 0 4px 16px rgba(0,0,0,0.15);
-      opacity: 0;
-      transform: translateX(20px);
-      transition: opacity 0.25s, transform 0.25s;
-      pointer-events: all;
-      max-width: 300px;
-    }
-
-    .toast.show { opacity: 1; transform: translateX(0); }
-    .toast.t-success { background: #15803d; }
-    .toast.t-error   { background: #be123c; }
-    .toast.t-warn    { background: #b45309; }
-
-    /* ── Divider ── */
-    .section-divider {
-      border: none;
-      border-top: 1px solid var(--border);
-      margin: 28px 0;
-    }
-
-    /* ── Feedback area ── */
-    #feedback { margin-bottom: 4px; }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Admin Portal — Policy Badger - Raymond</title>
+  <link rel="stylesheet" href="/assets/css/badger.css">
+  <script defer src="/assets/js/badger.js"></script>
 </head>
 <body>
-
-  <!-- ── Header ─────────────────────────────────────────────── -->
-  <header class="site-header">
-    <div class="header-logo">
-      <div class="icon">🦡</div>
-      <div class="wordmark">
-        <strong>Policy Badger</strong>
-        <span>Admin Portal</span>
-      </div>
-    </div>
-    <div class="header-right">
-      <span id="header-role-badge" class="role-badge" style="display:none;"></span>
-      <a href="/" class="header-link primary">Back to Chat</a>
-      <a href="/logout" class="header-link">Log Out</a>
-    </div>
-  </header>
-
-  <!-- ── Tab Bar ────────────────────────────────────────────── -->
-  <nav class="tab-bar">
-    <button class="tab-btn active" onclick="switchTab('pipeline')" id="tab-pipeline-btn">
-      <span class="tab-icon">📋</span> Policy Ingestion Pipeline
-    </button>
-    <button class="tab-btn" onclick="switchTab('users')" id="tab-users-btn">
-      <span class="tab-icon">👥</span> User Management
-    </button>
-  </nav>
-
-  <!-- ── Main ───────────────────────────────────────────────── -->
-  <main class="main">
-
-    <!-- ════════════════ PIPELINE TAB ════════════════ -->
-    <div id="tab-pipeline" class="tab-panel active">
-
-      <!-- Step tracker -->
-      <div class="step-tracker" id="step-tracker">
-        <div class="step-item">
-          <div class="step-circle active" id="sc-1">1</div>
-          <span class="step-label active" id="sl-1">Input</span>
+  <div class="app admin-app" id="app">
+    <main class="canvas">
+      <header class="topbar wrap">
+        <button type="button" class="rail-toggle icon-btn on-light" id="rail-toggle" aria-label="Toggle navigation" aria-controls="rail" aria-expanded="false"><span data-icon="menu" aria-hidden="true"></span></button>
+        <a class="row grow" href="/" aria-label="Policy Badger - Raymond home">
+          <span id="brand-mark" class="wordmark" aria-hidden="true"></span>
+          <span class="wordmark">Policy Badger<span class="sub">Raymond</span></span>
+        </a>
+        <div class="topbar-actions wrap">
+          <span id="header-role-badge" class="badge violet hidden"></span>
+          <a href="/" class="btn btn-ghost">Back to Chat</a>
+          <a href="/logout" class="btn btn-dark"><span data-icon="logout" aria-hidden="true"></span>Log Out</a>
         </div>
-        <div class="step-line" id="line-1"></div>
-        <div class="step-item">
-          <div class="step-circle" id="sc-2">2</div>
-          <span class="step-label" id="sl-2">Review</span>
-        </div>
-        <div class="step-line" id="line-2"></div>
-        <div class="step-item">
-          <div class="step-circle" id="sc-3">3</div>
-          <span class="step-label" id="sl-3">Preview</span>
-        </div>
-        <div class="step-line" id="line-3"></div>
-        <div class="step-item">
-          <div class="step-circle" id="sc-4">4</div>
-          <span class="step-label" id="sl-4">Published</span>
-        </div>
-      </div>
-
-      <!-- Step 1: Input -->
-      <div class="card" id="step-1">
-        <div class="card-title">📄 Policy Details</div>
-
-        <div class="form-group">
-          <label class="field-label" for="title">Policy Title</label>
-          <input type="text" id="title" placeholder="e.g., Remote Work Reimbursement Policy" />
-        </div>
-        <div class="form-group" style="margin-bottom:0;">
-          <label class="field-label" for="raw-text">Raw Policy Text</label>
-          <textarea id="raw-text" rows="7" placeholder="Paste the full policy text here…"></textarea>
-        </div>
-
-        <div id="feedback" style="margin-top:16px;"></div>
-
-        <div style="display:flex; align-items:center; gap:14px; margin-top:4px;">
-          <button class="btn btn-primary" id="extract-btn" onclick="extractPolicy()">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
-            Extract Policy
-          </button>
-          <div class="loading-row" id="extract-loading">
-            <div class="spinner"></div> Processing with AI…
-          </div>
-        </div>
-      </div>
-
-      <!-- Clarification box -->
-      <div class="clarify-card" id="step-clarify">
-        <div class="clarify-title">⚠️ The AI needs more information to extract this policy accurately.</div>
-        <ul id="clarify-questions"></ul>
-        <div class="form-group" style="margin-bottom:12px;">
-          <textarea id="clarification-text" rows="3"
-            placeholder="Add clarification here to re-run extraction…"
-            style="border-color: var(--warn-border); background:#fffdf5;"></textarea>
-        </div>
-        <div style="display:flex; align-items:center; gap:14px;">
-          <button class="btn btn-warn" id="clarify-btn" onclick="submitClarification()">Re-run with Clarification</button>
-          <div class="loading-row" id="clarify-loading">
-            <div class="spinner"></div> Re-extracting…
-          </div>
-        </div>
-      </div>
-
-      <!-- Step 2: Review -->
-      <div class="fields-section" id="step-ready">
-        <div class="card">
-          <div class="card-title" style="justify-content:space-between;">
-            <span>✏️ Extracted Fields</span>
-            <span id="confidence-badge"></span>
-          </div>
-
-          <div id="review-alert" class="alert alert-warning" style="display:none;"></div>
-
-          <table class="fields-table">
-            <tbody id="fields-table"></tbody>
-          </table>
-
-          <div id="ready-actions" style="display:none;">
-            <div style="display:flex; align-items:center; gap:14px;">
-              <button class="btn btn-accent" id="preview-btn" onclick="previewPolicy()">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                Generate Preview
-              </button>
-              <div class="loading-row" id="preview-loading">
-                <div class="spinner"></div> Simulating chatbot answer…
+      </header>
+      <div class="sheet scroll-y" id="admin-sheet">
+        <div class="sheet-inner">
+          <p id="access-message" class="alert alert-info" role="status">Verifying administrator access…</p>
+          <noscript><p class="alert alert-warn">Enable JavaScript to use Policy Studio and Team Access.</p></noscript>
+          <div id="admin-ui" class="hidden">
+            <div class="tabs mb-24" role="tablist" aria-label="Admin tools">
+              <button type="button" class="tab active" role="tab" id="tab-studio-btn" aria-controls="tab-studio" aria-selected="true" data-tab="studio"><span data-icon="layers" aria-hidden="true"></span>Policy Studio</button>
+              <button type="button" class="tab" role="tab" id="tab-users-btn" aria-controls="tab-users" aria-selected="false" tabindex="-1" data-tab="users"><span data-icon="users" aria-hidden="true"></span>Team Access</button>
+            </div>
+            <section id="tab-studio" class="tab-panel active" role="tabpanel" aria-labelledby="tab-studio-btn" tabindex="0">
+              <div class="stepper" id="step-tracker" role="list" aria-label="Policy publishing progress">
+                <div class="step active" role="listitem" aria-current="step"><span class="step-dot active" id="sc-1">1</span><span class="step-name active" id="sl-1">Input</span></div>
+                <div class="step-bar" id="line-1" aria-hidden="true"></div>
+                <div class="step" role="listitem"><span class="step-dot" id="sc-2">2</span><span class="step-name" id="sl-2">Review</span></div>
+                <div class="step-bar" id="line-2" aria-hidden="true"></div>
+                <div class="step" role="listitem"><span class="step-dot" id="sc-3">3</span><span class="step-name" id="sl-3">Preview</span></div>
+                <div class="step-bar" id="line-3" aria-hidden="true"></div>
+                <div class="step" role="listitem"><span class="step-dot" id="sc-4">4</span><span class="step-name" id="sl-4">Published</span></div>
               </div>
-            </div>
+              <section class="card" id="step-1" aria-labelledby="details-title">
+                <h1 class="card-title mt-0 mb-16" id="details-title"><span data-icon="doc" aria-hidden="true"></span>Policy Details</h1>
+                <div class="field">
+                  <label class="field-label" for="title">Policy Title</label>
+                  <input type="text" class="input" id="title" placeholder="e.g., Remote Work Reimbursement Policy">
+                </div>
+                <div class="field">
+                  <label class="field-label" for="raw-text">Raw Policy Text</label>
+                  <textarea class="textarea" id="raw-text" rows="8" placeholder="Paste the full policy text here…"></textarea>
+                </div>
+                <div class="row wrap">
+                  <button type="button" class="btn btn-violet" id="extract-btn"><span data-icon="sparkle" aria-hidden="true"></span>Extract Policy</button>
+                  <div class="loading-row" id="extract-loading" role="status"><span class="spinner" aria-hidden="true"></span>Reading the policy…</div>
+                </div>
+              </section>
+              <section class="card" id="step-clarify" style="display:none;" aria-label="Policy clarification">
+                <div class="alert alert-warn">
+                  <strong>The AI needs more information to extract this policy accurately.</strong>
+                  <ul id="clarify-questions" class="mb-0"></ul>
+                </div>
+                <div class="field">
+                  <label class="field-label" for="clarification-text">Your clarification</label>
+                  <textarea class="textarea" id="clarification-text" rows="3" placeholder="Add clarification here to re-run extraction…"></textarea>
+                </div>
+                <div class="row wrap">
+                  <button type="button" class="btn btn-ghost" id="clarify-btn">Re-run with Clarification</button>
+                  <div class="loading-row" id="clarify-loading" role="status"><span class="spinner" aria-hidden="true"></span>Re-extracting…</div>
+                </div>
+              </section>
+              <section class="card" id="step-ready" style="display:none;" aria-labelledby="fields-title">
+                <div class="card-head wrap">
+                  <h2 class="card-title mt-0 mb-0" id="fields-title"><span data-icon="edit" aria-hidden="true"></span>Extracted Fields</h2>
+                  <span id="confidence-badge"></span>
+                </div>
+                <div id="review-alert" class="alert alert-warn" style="display:none;"></div>
+                <table class="table admin-fields mb-16" aria-label="Editable extracted policy fields"><tbody id="fields-table"></tbody></table>
+                <div id="ready-actions" style="display:none;">
+                  <div class="row wrap">
+                    <button type="button" class="btn btn-violet" id="preview-btn"><span data-icon="eye" aria-hidden="true"></span>Generate Preview</button>
+                    <div class="loading-row" id="preview-loading" role="status"><span class="spinner" aria-hidden="true"></span>Simulating chatbot answer…</div>
+                  </div>
+                </div>
+              </section>
+              <section class="card" id="step-preview" style="display:none;" aria-labelledby="preview-title">
+                <h2 class="card-title mt-0 mb-16" id="preview-title"><span data-icon="chat" aria-hidden="true"></span>Preview</h2>
+                <div class="card tint">
+                  <p class="strong mt-0" id="preview-question"></p>
+                  <div id="preview-answer" class="admin-preview-answer"></div>
+                </div>
+                <div class="row wrap">
+                  <button type="button" class="btn btn-lime" id="publish-btn"><span data-icon="check" aria-hidden="true"></span>Publish to Database</button>
+                  <button type="button" class="btn btn-quiet" id="back-fields-btn">Back to Fields</button>
+                  <div class="loading-row" id="publish-loading" role="status"><span class="spinner" aria-hidden="true"></span>Publishing…</div>
+                </div>
+              </section>
+            </section>
+            <section id="tab-users" class="tab-panel" role="tabpanel" aria-labelledby="tab-users-btn" tabindex="0">
+              <section class="card" aria-labelledby="create-title">
+                <h1 class="card-title mt-0 mb-16" id="create-title"><span data-icon="plus" aria-hidden="true"></span>Create New User</h1>
+                <div class="grid-4">
+                  <div class="field mb-0"><label class="field-label" for="new-user-name">Username</label><input type="text" class="input" id="new-user-name" placeholder="e.g., john.doe" autocomplete="off"></div>
+                  <div class="field mb-0"><label class="field-label" for="new-user-pass">Temporary Password</label><input type="password" class="input" id="new-user-pass" placeholder="They’ll be prompted to change it" autocomplete="new-password"></div>
+                  <div class="field mb-0"><label class="field-label" for="new-user-email">Email <span class="optional">(optional)</span></label><input type="email" class="input" id="new-user-email" placeholder="user@raymond.com"></div>
+                  <div class="field mb-0"><label class="field-label" for="new-user-role">Role</label><select class="select" id="new-user-role"><option value="employee">Employee</option></select></div>
+                </div>
+                <button type="button" class="btn btn-violet mt-24" id="create-user-btn">Create User</button>
+                <div class="alert alert-info mt-16">New users will be required to set a personal password on their first login.</div>
+              </section>
+              <section class="card" aria-labelledby="members-title">
+                <div class="card-head wrap"><h2 class="card-title mt-0 mb-0" id="members-title">Team Members</h2><span id="user-count" class="small muted"></span></div>
+                <div class="table-scroll" tabindex="0" role="region" aria-label="Team members">
+                  <table class="table">
+                    <thead><tr><th scope="col">Username</th><th scope="col">Role</th><th scope="col" id="added-by-header" style="display:none;">Added By</th><th scope="col">Status</th><th scope="col">Actions</th></tr></thead>
+                    <tbody id="users-tbody"><tr><td colspan="4" class="empty">Loading users…</td></tr></tbody>
+                  </table>
+                </div>
+              </section>
+            </section>
           </div>
         </div>
       </div>
-
-      <!-- Step 3: Preview & Publish -->
-      <div class="preview-section" id="step-preview">
-        <div class="card">
-          <div class="card-title">💬 Simulated Chatbot Preview</div>
-          <div class="preview-box">
-            <div class="preview-q" id="preview-question"></div>
-            <div class="preview-a" id="preview-answer"></div>
-          </div>
-          <div style="display:flex; align-items:center; gap:14px;">
-            <button class="btn btn-success" id="publish-btn" onclick="publishPolicy()">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-              Publish to Database
-            </button>
-            <button class="btn btn-ghost" onclick="scrollToStep1()">← Edit Fields</button>
-            <div class="loading-row" id="publish-loading">
-              <div class="spinner"></div> Publishing…
-            </div>
-          </div>
-        </div>
+    </main>
+  </div>
+  <div class="modal-veil" id="reset-modal">
+    <form class="modal" id="reset-form" role="dialog" aria-modal="true" aria-labelledby="reset-title" aria-describedby="reset-description" novalidate>
+      <div class="modal-head"><h2 class="card-title mt-0 mb-0" id="reset-title">Reset Password</h2><button type="button" class="icon-btn on-light" id="reset-close" aria-label="Close password reset"><span data-icon="x" aria-hidden="true"></span></button></div>
+      <div class="modal-body">
+        <p class="muted mt-0" id="reset-description">Enter a new temporary password. This user will be prompted to change it on their next login.</p>
+        <div class="field"><label class="field-label" for="reset-password">Temporary Password</label><input type="password" class="input" id="reset-password" autocomplete="new-password" required></div>
       </div>
-
-    </div><!-- /tab-pipeline -->
-
-
-    <!-- ════════════════ USERS TAB ════════════════ -->
-    <div id="tab-users" class="tab-panel">
-
-      <!-- Create User -->
-      <div class="card">
-        <div class="card-title">➕ Create New User</div>
-
-        <div class="create-user-grid">
-          <div class="form-group" style="margin-bottom:0;">
-            <label class="field-label" for="new-user-name">Username</label>
-            <input type="text" id="new-user-name" placeholder="e.g., john.doe" autocomplete="off" />
-          </div>
-          <div class="form-group" style="margin-bottom:0;">
-            <label class="field-label" for="new-user-pass">Temporary Password</label>
-            <input type="password" id="new-user-pass" placeholder="They'll be prompted to change it" autocomplete="new-password" />
-          </div>
-          <div class="form-group" style="margin-bottom:0;">
-            <label class="field-label" for="new-user-email">Email <span class="optional">(optional)</span></label>
-            <input type="email" id="new-user-email" placeholder="user@raymond.com" />
-          </div>
-          <div class="form-group" style="margin-bottom:0;">
-            <label class="field-label" for="new-user-role">Role</label>
-            <select id="new-user-role">
-              <option value="employee">Employee</option>
-            </select>
-          </div>
-        </div>
-
-        <div class="user-form-footer" style="margin-top:20px;">
-          <button class="btn btn-primary" id="create-user-btn" onclick="createUser()">Create User</button>
-          <span class="inline-msg" id="create-user-msg"></span>
-        </div>
-
-        <div class="alert alert-info" style="margin-top:18px; margin-bottom:0; font-size:13px;">
-          New users will be required to set a personal password on their first login.
-        </div>
-      </div>
-
-      <!-- Users list -->
-      <div class="card" style="padding-bottom:8px;">
-        <div class="card-title" style="margin-bottom:16px;">
-          Team Members
-          <span id="user-count" style="font-size:12px; font-weight:400; color:var(--muted); margin-left:6px;"></span>
-        </div>
-
-        <div class="table-scroll-wrap">
-          <table class="users-table">
-            <thead>
-              <tr>
-                <th>Username</th>
-                <th>Role</th>
-                <th id="added-by-header" style="display:none;">Added By</th>
-                <th>Status</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="users-tbody">
-              <tr><td colspan="4" class="empty-state">Loading users…</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div><!-- /tab-users -->
-
-  </main>
-
-  <div id="toast-container"></div>
-
+      <div class="modal-foot"><button type="button" class="btn btn-ghost" id="reset-cancel">Cancel</button><button type="submit" class="btn btn-violet" id="reset-submit">Reset Password</button></div>
+    </form>
+  </div>
+  <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
   <script>
-    // ── Tab switching ────────────────────────────────────────
-    function switchTab(name) {
-      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-      document.getElementById('tab-' + name).classList.add('active');
-      document.getElementById('tab-' + name + '-btn').classList.add('active');
+  document.addEventListener('DOMContentLoaded', () => {
+    function switchTab(name, updateHash = true) {
+      name = name === 'users' ? 'users' : 'studio';
+      document.querySelectorAll('[data-tab]').forEach(button => {
+        const active = button.dataset.tab === name;
+        button.classList.toggle('active', active);
+        button.setAttribute('aria-selected', String(active));
+        button.tabIndex = active ? 0 : -1;
+        document.getElementById('tab-' + button.dataset.tab).classList.toggle('active', active);
+      });
+      document.querySelectorAll('#rail a[href^="/admin#"]').forEach(link => {
+        const active = link.hash === '#' + name;
+        link.classList.toggle('active', active);
+        if (active) link.setAttribute('aria-current', 'page');
+        else link.removeAttribute('aria-current');
+      });
+      if (updateHash && location.hash !== '#' + name) location.hash = name;
     }
 
-    // ── Toast ────────────────────────────────────────────────
-    function toast(msg, type = 'success') {
-      const el = document.createElement('div');
-      el.className = `toast t-${type}`;
-      el.textContent = msg;
-      document.getElementById('toast-container').appendChild(el);
-      requestAnimationFrame(() => { requestAnimationFrame(() => el.classList.add('show')); });
-      setTimeout(() => {
-        el.classList.remove('show');
-        setTimeout(() => el.remove(), 300);
-      }, 3500);
-    }
-
-    // ── Step progress ────────────────────────────────────────
     function setStep(n) {
       for (let i = 1; i <= 4; i++) {
         const circle = document.getElementById('sc-' + i);
-        const label  = document.getElementById('sl-' + i);
-        circle.className = 'step-circle' + (i < n ? ' done' : i === n ? ' active' : '');
-        circle.textContent = i < n ? '✓' : String(i);
-        label.className  = 'step-label' + (i < n ? ' done' : i === n ? ' active' : '');
-        if (i < 4) {
-          document.getElementById('line-' + i).className = 'step-line' + (i < n ? ' done' : '');
-        }
+        const state = i < n ? ' done' : i === n ? ' active' : '';
+        circle.className = 'step-dot' + state;
+        circle.innerHTML = i < n ? Badger.Icons.check(15) : String(i);
+        circle.parentElement.className = 'step' + state;
+        if (i === n) circle.parentElement.setAttribute('aria-current', 'step');
+        else circle.parentElement.removeAttribute('aria-current');
+        document.getElementById('sl-' + i).className = 'step-name' + state;
+        if (i < 4) document.getElementById('line-' + i).className = 'step-bar' + (i < n ? ' done' : '');
       }
     }
 
-    // ── Feedback ─────────────────────────────────────────────
     function showFeedback(msg, type) {
-      document.getElementById('feedback').innerHTML =
-        `<div class="alert alert-${type}">${msg}</div>`;
+      Badger.toast(msg, type === 'warning' ? 'warn' : type);
     }
 
     function hideFeedback() {
-      document.getElementById('feedback').innerHTML = '';
+      document.getElementById('toasts').replaceChildren();
     }
 
+    function closeRail() {
+      document.getElementById('rail').classList.remove('open');
+      document.getElementById('rail-toggle').setAttribute('aria-expanded', 'false');
+    }
+
+    function bindAdminRail() {
+      document.getElementById('new-chat-btn').addEventListener('click', () => { location.href = '/'; });
+      document.getElementById('rail-search-btn').addEventListener('click', () => { location.href = '/#chats'; });
+      document.getElementById('rail-menu').addEventListener('click', () => {
+        if (document.getElementById('rail').classList.contains('open')) {
+          closeRail();
+          document.getElementById('rail-toggle').focus();
+        } else location.href = '/settings';
+      });
+      document.getElementById('rail-toggle').addEventListener('click', event => {
+        event.currentTarget.setAttribute('aria-expanded', String(document.getElementById('rail').classList.contains('open')));
+      });
+      document.querySelectorAll('#rail a[href^="/admin#"]').forEach(link => {
+        link.addEventListener('click', event => {
+          if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+          event.preventDefault();
+          switchTab(link.hash.slice(1));
+          closeRail();
+          document.querySelector('.tab.active').focus();
+        });
+      });
+      document.querySelectorAll('.rail-group').forEach(group => {
+        group.tabIndex = 0;
+        group.setAttribute('role', 'button');
+        group.setAttribute('aria-expanded', 'true');
+        group.querySelector('.grp-actions')?.remove();
+        group.addEventListener('click', () => group.setAttribute('aria-expanded', String(!group.classList.contains('collapsed'))));
+        group.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); group.click(); }
+        });
+      });
+      document.addEventListener('click', event => {
+        if (!event.target.closest('#rail, #rail-toggle')) closeRail();
+      });
+    }
+
+    document.querySelectorAll('[data-tab]').forEach(button => {
+      button.addEventListener('click', () => switchTab(button.dataset.tab));
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+        event.preventDefault();
+        const name = event.key === 'Home' ? 'studio' : event.key === 'End' ? 'users' : button.dataset.tab === 'studio' ? 'users' : 'studio';
+        switchTab(name);
+        document.getElementById('tab-' + name + '-btn').focus();
+      });
+    });
+    window.addEventListener('hashchange', () => switchTab(location.hash === '#users' ? 'users' : 'studio', false));
+    document.getElementById('extract-btn').addEventListener('click', extractPolicy);
+    document.getElementById('clarify-btn').addEventListener('click', submitClarification);
+    document.getElementById('preview-btn').addEventListener('click', previewPolicy);
+    document.getElementById('publish-btn').addEventListener('click', publishPolicy);
+    document.getElementById('create-user-btn').addEventListener('click', createUser);
+    document.getElementById('back-fields-btn').addEventListener('click', () => {
+      setStep(2);
+      document.getElementById('step-ready').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      document.querySelector('.edit-input')?.focus({ preventScroll: true });
+    });
+    document.getElementById('reset-form').addEventListener('submit', submitResetPassword);
+    document.getElementById('reset-close').addEventListener('click', closeResetModal);
+    document.getElementById('reset-cancel').addEventListener('click', closeResetModal);
+    document.getElementById('reset-modal').addEventListener('click', event => {
+      if (event.target.id === 'reset-modal') closeResetModal();
+    });
+    document.addEventListener('keydown', event => {
+      if (event.key === 'Escape') {
+        if (resetUserId !== null) closeResetModal();
+        else if (document.getElementById('rail')?.classList.contains('open')) {
+          closeRail();
+          document.getElementById('rail-toggle').focus();
+        }
+      }
+      if (event.key === 'Tab' && resetUserId !== null) {
+        const controls = [...document.querySelectorAll('#reset-form button:not(:disabled), #reset-form input')];
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+      }
+    });
     function hideResultSections() {
       document.getElementById('step-clarify').style.display = 'none';
       document.getElementById('step-ready').style.display = 'none';
@@ -906,13 +291,6 @@
       exception_text: "Exceptions",
       source_quote: "Source Quote"
     };
-
-    function escapeHtml(str) {
-      if (str === null || str === undefined) return '';
-      return String(str)
-        .replace(/&/g, "&amp;").replace(/</g, "&lt;")
-        .replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-    }
 
     // ── Extract ──────────────────────────────────────────────
     async function extractPolicy() {
@@ -952,7 +330,7 @@
     // ── Clarify ──────────────────────────────────────────────
     async function submitClarification() {
       const clarText = document.getElementById('clarification-text').value.trim();
-      if (!clarText) { toast('Please enter clarification text.', 'warn'); return; }
+      if (!clarText) { Badger.toast('Please enter clarification text.', 'warn'); return; }
 
       hideFeedback();
       const btn = document.getElementById('clarify-btn');
@@ -995,10 +373,10 @@
 
       // Confidence badge
       const conf = data.extracted_json?.item?.confidence || 0;
-      const cls  = conf >= 0.75 ? 'conf-high' : conf >= 0.5 ? 'conf-medium' : 'conf-low';
-      const lbl  = conf >= 0.75 ? 'High confidence' : conf >= 0.5 ? 'Medium confidence' : 'Low confidence';
+      const cls  = conf >= 0.8 ? 'ok' : conf >= 0.6 ? 'warn' : 'danger';
+      const lbl  = conf >= 0.8 ? 'High confidence' : conf >= 0.6 ? 'Medium confidence' : 'Low confidence';
       document.getElementById('confidence-badge').innerHTML =
-        `<span class="confidence-pill ${cls}">${lbl} (${conf.toFixed(2)})</span>`;
+        `<span class="badge ${cls}">${Badger.escHtml(lbl)} (${Badger.escHtml(conf.toFixed(2))})</span>`;
 
       // Clarification
       if (data.status === 'needs_clarification') {
@@ -1020,7 +398,7 @@
       const revAlert = document.getElementById('review-alert');
       if (data.status === 'needs_review') {
         revAlert.style.display = 'block';
-        revAlert.innerHTML = `<strong>Needs Review:</strong> ${escapeHtml(data.extracted_json?.item?.reason_if_not_publishable || 'Some fields may be incomplete — please review below.')}`;
+        revAlert.innerHTML = `<strong>Needs Review:</strong> ${Badger.escHtml(data.extracted_json?.item?.reason_if_not_publishable || 'Some fields may be incomplete — please review below.')}`;
       } else {
         revAlert.style.display = 'none';
       }
@@ -1035,8 +413,8 @@
 
       tbody.innerHTML += `
         <tr>
-          <th>Chunk Type</th>
-          <td class="meta-val">${escapeHtml(item.chunk_type || '—')}</td>
+          <th scope="row">Chunk Type</th>
+          <td class="meta-val">${Badger.escHtml(item.chunk_type || '—')}</td>
         </tr>
       `;
 
@@ -1045,8 +423,8 @@
         const label = FIELD_LABELS[field] || field;
         tbody.innerHTML += `
           <tr>
-            <th>${escapeHtml(label)}</th>
-            <td><input type="text" class="edit-input" data-field="${field}" value="${escapeHtml(String(val))}" /></td>
+            <th scope="row"><label for="edit-${field}">${Badger.escHtml(label)}</label></th>
+            <td><input type="text" class="input edit-input" id="edit-${field}" data-field="${field}" value="${Badger.escHtml(String(val))}" /></td>
           </tr>
         `;
       });
@@ -1087,6 +465,7 @@
         document.getElementById('preview-answer').textContent   = data.simulated_answer;
         currentExtractedJson = editedJson;
         setStep(3);
+        document.getElementById('publish-btn').disabled = false;
 
         document.getElementById('step-preview').scrollIntoView({ behavior: 'smooth', block: 'start' });
       } catch (err) {
@@ -1124,7 +503,7 @@
         document.getElementById('title').value    = '';
         document.getElementById('raw-text').value = '';
 
-        window.scrollTo({ top: 0, behavior: 'smooth' });
+        scrollToStep1();
       } catch (err) {
         showFeedback(err.message, 'error');
         btn.disabled = false;
@@ -1137,37 +516,41 @@
     let currentUser = null;
 
     async function initUserManagement() {
-      try {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) return;
-        currentUser = await res.json();
-
-        if (currentUser.role === 'employee') return;
-
-        // Role badge in header
+      currentUser = await Badger.me();
+      const isAdmin = currentUser && ['super_admin', 'manager_admin'].includes(currentUser.role);
+      const active = location.hash === '#users' ? 'users' : 'studio';
+      document.getElementById('app').insertAdjacentHTML('afterbegin',
+        Badger.renderRail({ active, user: currentUser, folders: [], threads: [] }));
+      Badger.bindRail();
+      bindAdminRail();
+      document.querySelectorAll('[data-icon]').forEach(node => {
+        node.innerHTML = Badger.Icons[node.dataset.icon](17);
+      });
+      document.getElementById('brand-mark').innerHTML = Badger.mark(28);
+      if (currentUser) {
         const badge = document.getElementById('header-role-badge');
-        badge.style.display = 'inline-block';
-        badge.textContent = currentUser.role.replace('_', ' ');
-        badge.className = 'role-badge ' + currentUser.role.replace('_', '-');
-
-        // Super admin gets manager_admin option
-        if (currentUser.role === 'super_admin') {
-          document.getElementById('new-user-role').innerHTML +=
-            '<option value="manager_admin">Manager Admin</option>';
-        }
-
-        await loadUsers();
-      } catch (e) {
-        console.error('initUserManagement error', e);
+        badge.textContent = Badger.roleLabel(currentUser.role);
+        badge.classList.remove('hidden');
       }
+      if (!isAdmin) {
+        document.getElementById('access-message').textContent = currentUser
+          ? 'Administrator access is required to use this page.'
+          : 'Unable to verify your session. Please log in again.';
+        return;
+      }
+      document.getElementById('access-message').classList.add('hidden');
+      document.getElementById('admin-ui').classList.remove('hidden');
+      if (currentUser.role === 'super_admin') {
+        document.getElementById('new-user-role').innerHTML +=
+          '<option value="manager_admin">Manager Admin</option>';
+      }
+      switchTab(active, false);
+      await loadUsers();
     }
 
     function rolePillHtml(role) {
-      const cls = role.replace('_', '-');
-      const label = role === 'super_admin' ? 'Super Admin'
-                  : role === 'manager_admin' ? 'Manager Admin'
-                  : 'Employee';
-      return `<span class="role-pill ${cls}">${label}</span>`;
+      const cls = role === 'super_admin' ? 'violet' : role === 'manager_admin' ? 'ok' : 'neutral';
+      return `<span class="badge ${cls}">${Badger.escHtml(Badger.roleLabel(role))}</span>`;
     }
 
     async function loadUsers() {
@@ -1192,7 +575,7 @@
           const emptyMsg = isSuperAdmin
             ? 'No users found.'
             : 'You haven\'t added any employees yet. Use the form above to create one.';
-          tbody.innerHTML = `<tr><td colspan="${colSpan}" class="empty-state">${emptyMsg}</td></tr>`;
+          tbody.innerHTML = `<tr><td colspan="${colSpan}" class="empty">${Badger.escHtml(emptyMsg)}</td></tr>`;
           return;
         }
 
@@ -1201,40 +584,42 @@
           const isSuper   = u.role === 'super_admin';
           const canManage = !isSelf && !isSuper;
 
-          const statusHtml = `<span class="status-pill">
-            <span class="status-dot ${u.is_active ? 'active' : 'inactive'}"></span>
+          const statusHtml = `<span class="badge ${u.is_active ? 'ok' : 'neutral'}">
             ${u.is_active ? 'Active' : 'Inactive'}
           </span>`;
 
           const actions = canManage ? `
-            <div class="action-row">
-              <button class="btn btn-sm btn-ghost" onclick="resetPassword('${u.id}')">Reset Password</button>
+            <div class="row wrap">
+              <button type="button" class="btn btn-sm btn-ghost" data-action="reset">Reset Password</button>
               ${u.is_active
-                ? `<button class="btn btn-sm btn-danger-ghost" onclick="deactivateUser('${u.id}')">Deactivate</button>`
-                : `<button class="btn btn-sm btn-success" onclick="reactivateUser('${u.id}')">Reactivate</button>`
+                ? '<button type="button" class="btn btn-sm btn-danger" data-action="deactivate">Deactivate</button>'
+                : '<button type="button" class="btn btn-sm btn-ghost" data-action="reactivate">Reactivate</button>'
               }
-            </div>` : '<span style="color:var(--muted); font-size:12px;">—</span>';
+            </div>` : '<span class="faint small">—</span>';
 
           const addedByCell = isSuperAdmin
             ? `<td class="added-by-cell">${u.created_by_username
-                ? `<span class="by-name">${escapeHtml(u.created_by_username)}</span>`
-                : '<span style="color:var(--muted);">—</span>'
+                ? `<span class="by-name">${Badger.escHtml(u.created_by_username)}</span>`
+                : '<span class="faint">—</span>'
               }</td>`
             : '';
 
           const row = document.createElement('tr');
           if (!u.is_active) row.classList.add('inactive');
           row.innerHTML = `
-            <td style="font-weight:500;">${escapeHtml(u.username)}${isSelf ? ' <span style="font-size:11px;color:var(--muted);">(you)</span>' : ''}</td>
+            <td class="strong">${Badger.escHtml(u.username)}${isSelf ? ' <span class="tiny faint">(you)</span>' : ''}</td>
             <td>${rolePillHtml(u.role)}</td>
             ${addedByCell}
             <td>${statusHtml}</td>
             <td>${actions}</td>
           `;
+          row.querySelector('[data-action="reset"]')?.addEventListener('click', () => resetPassword(u.id));
+          row.querySelector('[data-action="deactivate"]')?.addEventListener('click', () => deactivateUser(u.id));
+          row.querySelector('[data-action="reactivate"]')?.addEventListener('click', () => reactivateUser(u.id));
           tbody.appendChild(row);
         });
       } catch (e) {
-        console.error('loadUsers error', e);
+        Badger.toast('Unable to load team members.', 'error');
       }
     }
 
@@ -1243,15 +628,11 @@
       const pass     = document.getElementById('new-user-pass').value;
       const role     = document.getElementById('new-user-role').value;
       const email    = document.getElementById('new-user-email').value.trim() || null;
-      const msg      = document.getElementById('create-user-msg');
       const btn      = document.getElementById('create-user-btn');
 
-      msg.style.display = 'none';
 
       if (!username || !pass) {
-        msg.textContent   = 'Username and password are required.';
-        msg.className     = 'inline-msg err';
-        msg.style.display = 'inline';
+        Badger.toast('Username and password are required.', 'error');
         return;
       }
 
@@ -1267,23 +648,49 @@
 
         if (!res.ok) throw new Error(data.error || 'Something went wrong.');
 
-        toast(`User "${username}" created successfully.`, 'success');
+        Badger.toast(`User "${username}" created successfully.`, 'success');
         document.getElementById('new-user-name').value  = '';
         document.getElementById('new-user-pass').value  = '';
         document.getElementById('new-user-email').value = '';
         await loadUsers();
       } catch (e) {
-        msg.textContent   = e.message;
-        msg.className     = 'inline-msg err';
-        msg.style.display = 'inline';
+        Badger.toast(e.message, 'error');
       } finally {
         btn.disabled = false;
       }
     }
 
-    async function resetPassword(id) {
-      const newPass = prompt('Enter a new temporary password for this user:');
-      if (!newPass) return;
+    let resetUserId = null;
+    let resetTrigger = null;
+
+    function resetPassword(id) {
+      resetUserId = id;
+      resetTrigger = document.activeElement;
+      document.getElementById('reset-password').value = '';
+      Badger.openModal('reset-modal');
+      document.getElementById('app').inert = true;
+      document.getElementById('reset-password').focus();
+    }
+
+    function closeResetModal() {
+      Badger.closeModal('reset-modal');
+      document.getElementById('app').inert = false;
+      document.getElementById('reset-password').value = '';
+      resetUserId = null;
+      if (resetTrigger?.isConnected) resetTrigger.focus();
+    }
+
+    async function submitResetPassword(event) {
+      event.preventDefault();
+      const id = resetUserId;
+      const newPass = document.getElementById('reset-password').value;
+      if (!newPass || id === null) {
+        Badger.toast('Please enter a temporary password.', 'warn');
+        return;
+      }
+      const btn = document.getElementById('reset-submit');
+      if (btn.disabled) return;
+      btn.disabled = true;
       try {
         const res = await fetch(`/api/admin/users/${id}/reset-password`, {
           method: 'POST',
@@ -1291,32 +698,35 @@
           body: JSON.stringify({ new_password: newPass })
         });
         if (res.ok) {
-          toast('Password reset. User will be prompted to change it on next login.', 'success');
+          Badger.toast('Password reset. User will be prompted to change it on next login.', 'success');
+          if (resetUserId === id) closeResetModal();
         } else {
-          toast((await res.json()).error || 'Reset failed.', 'error');
+          Badger.toast((await res.json()).error || 'Reset failed.', 'error');
         }
-      } catch (e) { toast('Network error.', 'error'); }
+      } catch (e) { Badger.toast('Network error.', 'error'); }
+      finally { btn.disabled = false; }
     }
 
     async function deactivateUser(id) {
       if (!confirm('Deactivate this user? They will no longer be able to log in.')) return;
       try {
         const res = await fetch(`/api/admin/users/${id}/deactivate`, { method: 'POST' });
-        if (res.ok) { toast('User deactivated.', 'warn'); await loadUsers(); }
-        else toast((await res.json()).error || 'Error.', 'error');
-      } catch (e) { toast('Network error.', 'error'); }
+        if (res.ok) { Badger.toast('User deactivated.', 'warn'); await loadUsers(); }
+        else Badger.toast((await res.json()).error || 'Error.', 'error');
+      } catch (e) { Badger.toast('Network error.', 'error'); }
     }
 
     async function reactivateUser(id) {
       try {
         const res = await fetch(`/api/admin/users/${id}/reactivate`, { method: 'POST' });
-        if (res.ok) { toast('User reactivated.', 'success'); await loadUsers(); }
-        else toast((await res.json()).error || 'Error.', 'error');
-      } catch (e) { toast('Network error.', 'error'); }
+        if (res.ok) { Badger.toast('User reactivated.', 'success'); await loadUsers(); }
+        else Badger.toast((await res.json()).error || 'Error.', 'error');
+      } catch (e) { Badger.toast('Network error.', 'error'); }
     }
 
     // Init
-    initUserManagement();
+    initUserManagement().catch(() => Badger.toast('Unable to load the admin page.', 'error'));
+  });
   </script>
 </body>
 </html>

@@ -1,5 +1,5 @@
 """
-Policy Badger — FastAPI server with session-based auth.
+Policy Badger - Raymond — FastAPI server with session-based auth.
 Run locally: uvicorn policy_badger.web.app:app --reload
 """
 
@@ -16,6 +16,7 @@ import bcrypt
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Form, Request, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -76,10 +77,15 @@ def _check_password(username: str, plain: str) -> bool:
     return bcrypt.checkpw(plain.encode(), h)
 
 # ── App setup ─────────────────────────────────────────────────────────────────
-app = FastAPI(title="Policy Badger", docs_url=None, redoc_url=None)
+app = FastAPI(title="Policy Badger - Raymond", docs_url=None, redoc_url=None)
 app.add_middleware(SessionMiddleware, secret_key=SECRET_KEY, max_age=60 * 60 * 8)  # 8-hour session
 
 PUBLIC_DIR = _APP_DIR / "static"
+ASSETS_DIR = PUBLIC_DIR / "assets"
+
+# Shared stylesheet/scripts only. HTML templates are NOT mounted — they stay
+# behind the per-route session checks below.
+app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
 # ── Seeding Logic ─────────────────────────────────────────────────────────────
 @app.on_event("startup")
@@ -229,6 +235,14 @@ async def ask(req: AskRequest, request: Request):
         }
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/settings", response_class=HTMLResponse)
+async def settings_page(request: Request):
+    if not request.session.get("user"):
+        return RedirectResponse("/login", status_code=302)
+    if request.session.get("must_reset_password"):
+        return RedirectResponse("/change-password", status_code=302)
+    return HTMLResponse((PUBLIC_DIR / "settings.html").read_text(encoding="utf-8"))
 
 @app.get("/health")
 async def health():

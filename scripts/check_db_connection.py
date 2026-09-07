@@ -1,4 +1,4 @@
-"""Minimal PostgreSQL connection diagnostic for Policy Badger."""
+"""Minimal PostgreSQL connection diagnostic for Policy Badger - Raymond."""
 
 from __future__ import annotations
 

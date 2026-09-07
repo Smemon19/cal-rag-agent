@@ -29,3 +29,7 @@ build/
 *.db
 
 
+
+# Local virtualenvs (large; never needed in the image)
+.venv_local/
+.env

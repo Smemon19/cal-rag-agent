@@ -1,15 +1,33 @@
-<!doctype html>
-<html>
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Not Found</title>
-    <style>
-      body { font-family: -apple-system, system-ui, Segoe UI, Roboto, Helvetica, Arial, sans-serif; padding: 40px; }
-    </style>
-  </head>
-  <body>
-    <h1>404</h1>
-    <p>This route is served by Cloud Run via Firebase Hosting rewrite.</p>
-  </body>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page not found — Policy Badger - Raymond</title>
+  <link rel="stylesheet" href="/assets/css/badger.css">
+  <script defer src="/assets/js/badger.js"></script>
+</head>
+<body>
+  <main class="auth">
+    <section class="auth-card" aria-labelledby="not-found-title">
+      <div class="auth-brand">
+        <span class="mark" id="brand-mark" aria-hidden="true"></span>
+        <div>
+          <h1>Policy Badger</h1>
+          <p class="sub">Raymond</p>
+        </div>
+      </div>
+      <p class="auth-code strong">404</p>
+      <h2 id="not-found-title">Page not found</h2>
+      <p class="lede">We couldn't find that page. Return to Policy Badger to continue.</p>
+      <a class="btn btn-ghost btn-block" href="/">Back to Policy Badger</a>
+      <div class="auth-foot">Policy Badger - Raymond</div>
+    </section>
+  </main>
+  <script>
+    document.addEventListener('DOMContentLoaded', function () {
+      document.getElementById('brand-mark').innerHTML = Badger.mark(22);
+    });
+  </script>
+</body>
 </html>

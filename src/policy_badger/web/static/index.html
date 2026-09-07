@@ -1,619 +1,387 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Policy Badger</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
-  <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-    :root {
-      --navy:      #0f1729;
-      --navy-mid:  #1a2540;
-      --navy-soft: #243050;
-      --accent:    #4f8ef7;
-      --accent-dim:#3a6fd4;
-      --surface:   #f7f8fc;
-      --card:      #ffffff;
-      --border:    #e4e8f0;
-      --text:      #1c2333;
-      --muted:     #8892a4;
-      --tag-bg:    #eef2ff;
-      --tag-text:  #4f6ef5;
-      --error-bg:  #fff1f1;
-      --error:     #c0392b;
-    }
-
-    html, body {
-      height: 100%;
-      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      background: var(--surface);
-      color: var(--text);
-    }
-
-    /* ── LAYOUT ─────────────────────────────── */
-    .shell {
-      display: flex;
-      height: 100vh;
-      overflow: hidden;
-    }
-
-    /* ── SIDEBAR ─────────────────────────────── */
-    .sidebar {
-      width: 260px;
-      flex-shrink: 0;
-      background: var(--navy);
-      display: flex;
-      flex-direction: column;
-      padding: 28px 20px 24px;
-      gap: 32px;
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-    }
-
-    .brand-icon {
-      width: 40px;
-      height: 40px;
-      background: linear-gradient(135deg, #4f8ef7 0%, #7c5be6 100%);
-      border-radius: 10px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 20px;
-      flex-shrink: 0;
-    }
-
-    .brand-text h1 {
-      font-size: 15px;
-      font-weight: 600;
-      color: #fff;
-      letter-spacing: 0.2px;
-    }
-
-    .brand-text p {
-      font-size: 11.5px;
-      color: #6b7fa3;
-      margin-top: 2px;
-    }
-
-    .sidebar-section-label {
-      font-size: 10px;
-      font-weight: 600;
-      color: #4a5878;
-      letter-spacing: 0.8px;
-      text-transform: uppercase;
-      margin-bottom: 10px;
-    }
-
-    .suggestions {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-    }
-
-    .suggestion-btn {
-      background: var(--navy-mid);
-      border: 1px solid #243050;
-      border-radius: 8px;
-      color: #a8b8d8;
-      font-size: 12px;
-      font-family: inherit;
-      padding: 9px 12px;
-      text-align: left;
-      cursor: pointer;
-      line-height: 1.4;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
-    }
-
-    .suggestion-btn:hover {
-      background: var(--navy-soft);
-      border-color: #364870;
-      color: #d0ddf5;
-    }
-
-    .sidebar-footer {
-      margin-top: auto;
-      font-size: 11px;
-      color: #3d4f6a;
-      line-height: 1.6;
-    }
-
-    /* ── MAIN CHAT AREA ──────────────────────── */
-    .main {
-      flex: 1;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-      background: var(--surface);
-    }
-
-    /* ── TOPBAR ──────────────────────────────── */
-    .topbar {
-      flex-shrink: 0;
-      background: var(--card);
-      border-bottom: 1px solid var(--border);
-      padding: 14px 28px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-
-    .topbar-title {
-      font-size: 14px;
-      font-weight: 600;
-      color: var(--text);
-    }
-
-    .status-dot {
-      display: flex;
-      align-items: center;
-      gap: 7px;
-      font-size: 12px;
-      color: var(--muted);
-    }
-
-    .dot {
-      width: 7px;
-      height: 7px;
-      background: #22c55e;
-      border-radius: 50%;
-      animation: breathe 2.5s ease-in-out infinite;
-    }
-
-    @keyframes breathe {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.4; }
-    }
-
-    /* ── MESSAGES ────────────────────────────── */
-    #chat {
-      flex: 1;
-      overflow-y: auto;
-      padding: 32px 28px;
-      display: flex;
-      flex-direction: column;
-      gap: 20px;
-      scroll-behavior: smooth;
-    }
-
-    #chat::-webkit-scrollbar { width: 5px; }
-    #chat::-webkit-scrollbar-track { background: transparent; }
-    #chat::-webkit-scrollbar-thumb { background: #d0d7e6; border-radius: 10px; }
-
-    /* Empty state */
-    .empty-state {
-      margin: auto;
-      text-align: center;
-      max-width: 380px;
-    }
-
-    .empty-icon {
-      width: 64px;
-      height: 64px;
-      background: linear-gradient(135deg, #eef2ff 0%, #e5edff 100%);
-      border-radius: 18px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 30px;
-      margin: 0 auto 18px;
-    }
-
-    .empty-state h2 {
-      font-size: 17px;
-      font-weight: 600;
-      color: var(--text);
-      margin-bottom: 8px;
-    }
-
-    .empty-state p {
-      font-size: 13.5px;
-      color: var(--muted);
-      line-height: 1.6;
-    }
-
-    /* Message rows */
-    .message-row {
-      display: flex;
-      gap: 12px;
-      animation: fadeUp 0.2s ease both;
-    }
-
-    @keyframes fadeUp {
-      from { opacity: 0; transform: translateY(8px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-
-    .message-row.user {
-      flex-direction: row-reverse;
-    }
-
-    .avatar {
-      width: 32px;
-      height: 32px;
-      border-radius: 8px;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 15px;
-      margin-top: 2px;
-    }
-
-    .avatar.bot-avatar {
-      background: linear-gradient(135deg, #4f8ef7 0%, #7c5be6 100%);
-    }
-
-    .avatar.user-avatar {
-      background: var(--navy-soft);
-      font-size: 13px;
-      color: #a8b8d8;
-    }
-
-    .bubble {
-      max-width: 620px;
-      padding: 13px 17px;
-      border-radius: 14px;
-      font-size: 14px;
-      line-height: 1.7;
-      white-space: pre-wrap;
-      word-break: break-word;
-    }
-
-    .message-row.bot .bubble {
-      background: var(--card);
-      color: var(--text);
-      border-radius: 4px 14px 14px 14px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px var(--border);
-    }
-
-    .message-row.user .bubble {
-      background: var(--navy);
-      color: #e8edf8;
-      border-radius: 14px 4px 14px 14px;
-    }
-
-    .message-row.error .bubble {
-      background: var(--error-bg);
-      color: var(--error);
-      border-radius: 4px 14px 14px 14px;
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    }
-
-    .bubble-meta {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-      margin-top: 10px;
-      padding-top: 10px;
-      border-top: 1px solid var(--border);
-    }
-
-    .meta-tag {
-      background: var(--tag-bg);
-      color: var(--tag-text);
-      font-size: 11px;
-      font-weight: 500;
-      padding: 3px 9px;
-      border-radius: 20px;
-    }
-
-    /* Typing indicator */
-    .typing-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 12px;
-      animation: fadeUp 0.2s ease both;
-    }
-
-    .typing-bubble {
-      background: var(--card);
-      box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px var(--border);
-      border-radius: 4px 14px 14px 14px;
-      padding: 14px 18px;
-      display: flex;
-      gap: 5px;
-      align-items: center;
-    }
-
-    .typing-dot {
-      width: 7px;
-      height: 7px;
-      background: #b0bcd4;
-      border-radius: 50%;
-      animation: bounce 1.2s ease-in-out infinite;
-    }
-
-    .typing-dot:nth-child(2) { animation-delay: 0.15s; }
-    .typing-dot:nth-child(3) { animation-delay: 0.3s; }
-
-    @keyframes bounce {
-      0%, 60%, 100% { transform: translateY(0); }
-      30% { transform: translateY(-6px); }
-    }
-
-    /* ── INPUT AREA ──────────────────────────── */
-    #input-area {
-      flex-shrink: 0;
-      background: var(--card);
-      border-top: 1px solid var(--border);
-      padding: 16px 28px 20px;
-    }
-
-    .input-wrap {
-      display: flex;
-      align-items: flex-end;
-      gap: 10px;
-      background: var(--surface);
-      border: 1.5px solid var(--border);
-      border-radius: 14px;
-      padding: 10px 10px 10px 16px;
-      transition: border-color 0.15s, box-shadow 0.15s;
-    }
-
-    .input-wrap:focus-within {
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px rgba(79,142,247,0.12);
-    }
-
-    #question {
-      flex: 1;
-      border: none;
-      background: transparent;
-      font-size: 14px;
-      font-family: inherit;
-      resize: none;
-      max-height: 140px;
-      outline: none;
-      color: var(--text);
-      line-height: 1.55;
-      padding: 2px 0;
-    }
-
-    #question::placeholder { color: #b0bcd4; }
-
-    #send {
-      width: 38px;
-      height: 38px;
-      background: var(--navy);
-      color: #fff;
-      border: none;
-      border-radius: 10px;
-      cursor: pointer;
-      flex-shrink: 0;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      transition: background 0.15s, transform 0.1s;
-    }
-
-    #send:hover { background: var(--accent-dim); }
-    #send:active { transform: scale(0.93); }
-    #send:disabled { background: #d0d7e6; cursor: not-allowed; transform: none; }
-
-    #send svg { width: 17px; height: 17px; }
-
-    .input-hint {
-      font-size: 11px;
-      color: #b8c2d8;
-      margin-top: 8px;
-      text-align: center;
-    }
-  </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Policy Badger - Raymond</title>
+  <link rel="stylesheet" href="/assets/css/badger.css">
+  <script defer src="/assets/js/badger.js"></script>
 </head>
-<body>
-<div class="shell">
-
-  <!-- ── SIDEBAR ── -->
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="brand-icon">🦡</div>
-      <div class="brand-text">
-        <h1>Policy Badger</h1>
-        <p>Company Policy Assistant</p>
-      </div>
-    </div>
-
-    <div>
-      <div class="sidebar-section-label">Try asking</div>
-      <div class="suggestions">
-        <button class="suggestion-btn" onclick="ask('What is the deadline for submitting timesheets?')">What is the timesheet deadline?</button>
-        <button class="suggestion-btn" onclick="ask('How do I submit an expense report?')">How do I submit an expense report?</button>
-        <button class="suggestion-btn" onclick="ask('What is the dress code policy?')">What is the dress code policy?</button>
-        <button class="suggestion-btn" onclick="ask('Do I need approval for professional development?')">PD approval requirements?</button>
-        <button class="suggestion-btn" onclick="ask('How should time at a company holiday party be charged?')">Charging time at a holiday party?</button>
-        <button class="suggestion-btn" onclick="ask('What is Bitwarden and why do we use it?')">What is Bitwarden?</button>
-      </div>
-    </div>
-
-    <div class="sidebar-footer">
-      Answers are generated from your company's ingested policy documents. Always verify critical decisions with HR or your manager.
-    </div>
-  </aside>
-
-  <!-- ── MAIN ── -->
-  <div class="main">
-
-    <!-- Topbar -->
-    <div class="topbar">
-      <div style="display: flex; gap: 20px; align-items: center;">
-        <span class="topbar-title">Policy Q&amp;A</span>
-        <a href="/admin" style="font-size: 13px; color: var(--accent); text-decoration: none; font-weight: 500;">Admin Tools</a>
-      </div>
-      <div style="display: flex; gap: 20px; align-items: center;">
-        <div class="status-dot">
-          <div class="dot"></div>
-          <span>Connected</span>
+<body class="policy-home">
+  <div class="app" id="app">
+    <main class="canvas" id="canvas">
+      <header class="topbar">
+        <button type="button" class="rail-toggle icon-btn on-light" id="rail-toggle" aria-label="Open navigation" aria-controls="rail" aria-expanded="false"></button>
+        <div class="wordmark grow">Policy Badger<span class="sub">Raymond</span></div>
+        <div class="topbar-actions">
+          <button type="button" class="btn btn-lime" id="new-question-btn"><span data-icon="sparkle" aria-hidden="true"></span>New Question</button>
+          <a class="btn btn-dark" href="/settings"><span data-icon="settings" aria-hidden="true"></span>Settings</a>
         </div>
-        <a href="/logout" style="font-size: 13px; color: var(--muted); text-decoration: none; font-weight: 500;">Log Out</a>
-      </div>
-    </div>
+      </header>
 
-    <!-- Messages -->
-    <div id="chat">
-      <div class="empty-state" id="empty">
-        <div class="empty-icon">🦡</div>
-        <h2>Ask me anything about company policy</h2>
-        <p>I search through your ingested policy documents to give you accurate, sourced answers. Try one of the suggestions on the left, or type your own question.</p>
-      </div>
-    </div>
+      <section class="hero scroll-y" id="home" aria-labelledby="hero-title">
+        <div class="hero-mark" id="hero-mark" aria-hidden="true"></div>
+        <h1 id="hero-title">How can we help you <em>today</em>?</h1>
+        <p class="lede">Find clarity in your company’s published policies. Ask a question and Policy Badger will search them for an answer, using only what those policies say.</p>
+        <div class="starters">
+          <button type="button" class="starter" data-question="What is the deadline for submitting timesheets?">
+            <span class="starter-top"><span class="starter-title">Timesheets &amp; Time Tracking</span><span class="starter-go" data-icon="arrowUpRight" aria-hidden="true"></span></span>
+            <span class="starter-desc">Deadlines, daily entries, and how to charge billable vs. overhead time.</span>
+          </button>
+          <button type="button" class="starter" data-question="How do I submit an expense report?">
+            <span class="starter-top"><span class="starter-title">Expenses &amp; Reimbursement</span><span class="starter-go" data-icon="arrowUpRight" aria-hidden="true"></span></span>
+            <span class="starter-desc">Categories, receipts, approval limits, and how to submit a claim.</span>
+          </button>
+          <button type="button" class="starter" data-question="How do I request paid time off?">
+            <span class="starter-top"><span class="starter-title">Time Off &amp; Holidays</span><span class="starter-go" data-icon="arrowUpRight" aria-hidden="true"></span></span>
+            <span class="starter-desc">PTO accrual, requests, unscheduled absences, and the holiday schedule.</span>
+          </button>
+          <button type="button" class="starter" data-question="Do I need approval for professional development?">
+            <span class="starter-top"><span class="starter-title">Approvals &amp; Training</span><span class="starter-go" data-icon="arrowUpRight" aria-hidden="true"></span></span>
+            <span class="starter-desc">Who signs off on what, and the rules for professional development.</span>
+          </button>
+        </div>
+      </section>
 
-    <!-- Input -->
-    <div id="input-area">
-      <div class="input-wrap">
-        <textarea id="question" rows="1" placeholder="Ask a policy question…" maxlength="1000"></textarea>
-        <button id="send" onclick="sendQuestion()" title="Send">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-            <line x1="22" y1="2" x2="11" y2="13"></line>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
-          </svg>
-        </button>
-      </div>
-      <div class="input-hint">Press Enter to send &nbsp;·&nbsp; Shift+Enter for new line</div>
-    </div>
+      <section class="thread scroll-y hidden" id="chat" aria-label="Policy conversation" tabindex="0">
+        <div class="thread-inner" id="messages" role="log" aria-live="polite" aria-relevant="additions"></div>
+      </section>
 
+      <div class="composer-wrap">
+        <form class="composer" id="composer">
+          <div class="composer-mark" id="composer-mark" aria-hidden="true"></div>
+          <textarea id="question" rows="1" placeholder="Ask about any company policy…" maxlength="1000" aria-label="Your policy question" aria-describedby="composer-hint"></textarea>
+          <div class="composer-tools">
+            <button type="button" class="icon-btn on-light hidden" id="mic" aria-label="Dictate a question" aria-pressed="false"></button>
+            <button type="submit" class="composer-send" id="send" aria-label="Send question" disabled></button>
+          </div>
+        </form>
+        <p class="composer-hint" id="composer-hint">Enter to send · Shift+Enter for a new line</p>
+      </div>
+    </main>
   </div>
-</div>
+  <noscript><p class="alert alert-info">Please enable JavaScript to ask Policy Badger a question.</p></noscript>
+  <div id="toasts" role="status" aria-live="polite"></div>
 
-<script>
-  const chat  = document.getElementById('chat');
-  const input = document.getElementById('question');
-  const btn   = document.getElementById('send');
-  const empty = document.getElementById('empty');
+  <script>
+    document.addEventListener('DOMContentLoaded', async function () {
+      'use strict';
+      const B = window.Badger;
+      const icons = B.Icons;
+      const input = B.el('question');
+      const send = B.el('send');
+      const chat = B.el('chat');
+      const messages = B.el('messages');
+      const home = B.el('home');
+      const toggle = B.el('rail-toggle');
+      const mic = B.el('mic');
+      const folders = [
+        { label: 'Time & Attendance', spine: 'var(--mint)' },
+        { label: 'Expenses & Travel', spine: 'var(--amber)' },
+        { label: 'HR & Conduct', spine: 'var(--rose)' }
+      ];
+      const headers = new Set(['Direct Answer', 'Key Details', 'Important Notes / Exceptions', 'What You Should Do']);
+      let threads = [];
+      let sequence = 0;
+      let pending = null;
+      let recognition = null;
+      let listening = false;
+      const canSpeak = !!(window.speechSynthesis && window.SpeechSynthesisUtterance);
 
-  // Auto-resize textarea
-  input.addEventListener('input', () => {
-    input.style.height = 'auto';
-    input.style.height = Math.min(input.scrollHeight, 140) + 'px';
-  });
-
-  input.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      sendQuestion();
-    }
-  });
-
-  function ask(text) {
-    input.value = text;
-    input.dispatchEvent(new Event('input'));
-    sendQuestion();
-  }
-
-  function hideEmpty() {
-    if (empty) empty.style.display = 'none';
-  }
-
-  function appendUser(text) {
-    hideEmpty();
-    const row = document.createElement('div');
-    row.className = 'message-row user';
-    row.innerHTML = `
-      <div class="avatar user-avatar">You</div>
-      <div class="bubble">${escHtml(text)}</div>`;
-    chat.appendChild(row);
-    scrollDown();
-  }
-
-  function appendBot(text, rowsFound) {
-    hideEmpty();
-    const row = document.createElement('div');
-    row.className = 'message-row bot';
-
-    let metaHtml = '';
-    if (rowsFound != null) {
-      metaHtml = `<div class="bubble-meta">
-        <span class="meta-tag">${rowsFound} policy record${rowsFound !== 1 ? 's' : ''} matched</span>
-      </div>`;
-    }
-
-    row.innerHTML = `
-      <div class="avatar bot-avatar">🦡</div>
-      <div class="bubble">${escHtml(text)}${metaHtml}</div>`;
-    chat.appendChild(row);
-    scrollDown();
-  }
-
-  function appendError(text) {
-    hideEmpty();
-    const row = document.createElement('div');
-    row.className = 'message-row error';
-    row.innerHTML = `
-      <div class="avatar bot-avatar">🦡</div>
-      <div class="bubble">${escHtml(text)}</div>`;
-    chat.appendChild(row);
-    scrollDown();
-  }
-
-  function addTyping() {
-    const row = document.createElement('div');
-    row.className = 'typing-row';
-    row.id = 'typing';
-    row.innerHTML = `
-      <div class="avatar bot-avatar">🦡</div>
-      <div class="typing-bubble">
-        <div class="typing-dot"></div>
-        <div class="typing-dot"></div>
-        <div class="typing-dot"></div>
-      </div>`;
-    chat.appendChild(row);
-    scrollDown();
-    return row;
-  }
-
-  function scrollDown() {
-    chat.scrollTop = chat.scrollHeight;
-  }
-
-  function escHtml(str) {
-    return str
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/\n/g, '<br>');
-  }
-
-  async function sendQuestion() {
-    const q = input.value.trim();
-    if (!q || btn.disabled) return;
-
-    appendUser(q);
-    input.value = '';
-    input.style.height = 'auto';
-    btn.disabled = true;
-
-    const typing = addTyping();
-
-    try {
-      const res = await fetch('/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q }),
+      document.querySelectorAll('[data-icon]').forEach(node => {
+        node.innerHTML = icons[node.dataset.icon](16);
       });
-      const data = await res.json();
-      typing.remove();
+      B.el('hero-mark').innerHTML = B.mark(52);
+      B.el('composer-mark').innerHTML = B.mark(19);
+      toggle.innerHTML = icons.menu(19);
+      send.innerHTML = icons.arrowRight(19);
+      mic.innerHTML = icons.mic(18);
+      B.autoGrow(input);
 
-      if (data.error) {
-        appendError('Error: ' + data.error);
-      } else {
-        appendBot(data.answer, data.rows_found);
+      // Resolve the existing session before rendering role-dependent navigation.
+      const user = await B.me();
+      const nameParts = String(user && user.username || '').trim().split(/[\s._@-]+/).filter(Boolean);
+      const initials = nameParts.length > 1
+        ? (Array.from(nameParts[0])[0] + Array.from(nameParts[1])[0]).toUpperCase()
+        : Array.from(nameParts[0] || 'You').slice(0, 2).join('').toUpperCase();
+      const railOptions = { active: 'home', user, folders, threads,
+        footer: 'Answers come only from your company’s published policies.' };
+      B.el('app').insertAdjacentHTML('afterbegin', B.renderRail(railOptions));
+      const rail = B.el('rail');
+      rail.setAttribute('aria-label', 'Main navigation');
+      // These shared decorative affordances have no actions on this page.
+      rail.querySelectorAll('.grp-actions, .row-more').forEach(node => node.remove());
+      const logout = document.createElement('a');
+      logout.className = 'rail-item';
+      logout.href = '/logout';
+      logout.innerHTML = icons.logout(17) + '<span>Log Out</span>';
+      rail.querySelector('.rail-foot').before(logout);
+      const railClose = B.el('rail-menu');
+      railClose.classList.add('rail-toggle');
+      railClose.setAttribute('aria-label', 'Close navigation');
+      railClose.innerHTML = icons.x(17);
+      railClose.addEventListener('click', () => closeRail(true));
+      B.bindRail();
+
+      const mobile = window.matchMedia('(max-width: 820px)');
+      function syncRail() {
+        const open = rail.classList.contains('open');
+        rail.inert = mobile.matches && !open;
+        B.el('canvas').inert = mobile.matches && open;
+        toggle.setAttribute('aria-expanded', String(open));
       }
-    } catch {
-      typing.remove();
-      appendError('Could not reach the server. Make sure it is running.');
-    }
+      function closeRail(restoreFocus = false) {
+        rail.classList.remove('open');
+        syncRail();
+        if (restoreFocus) toggle.focus();
+      }
+      toggle.addEventListener('click', () => {
+        syncRail();
+        if (rail.classList.contains('open')) railClose.focus();
+      });
+      mobile.addEventListener('change', syncRail);
+      syncRail();
+      document.addEventListener('keydown', event => {
+        if (!mobile.matches || !rail.classList.contains('open')) return;
+        if (event.key === 'Escape') closeRail(true);
+        if (event.key === 'Tab') {
+          const focusable = Array.from(rail.querySelectorAll('a, button, [tabindex="0"]'))
+            .filter(node => node.getClientRects().length && !node.disabled);
+          const first = focusable[0];
+          const last = focusable[focusable.length - 1];
+          if (event.shiftKey && document.activeElement === first) {
+            event.preventDefault(); last.focus();
+          } else if (!event.shiftKey && document.activeElement === last) {
+            event.preventDefault(); first.focus();
+          }
+        }
+      });
+      rail.querySelectorAll('.rail-group').forEach(group => {
+        const body = rail.querySelector('[data-for="' + group.dataset.group + '"]');
+        body.id = body.id || 'rail-' + group.dataset.group;
+        group.tabIndex = 0;
+        group.setAttribute('role', 'button');
+        group.setAttribute('aria-controls', body.id);
+        group.setAttribute('aria-expanded', 'true');
+        group.addEventListener('click', () => group.setAttribute('aria-expanded', String(!body.classList.contains('hidden'))));
+        group.addEventListener('keydown', event => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault(); group.click();
+          }
+        });
+      });
 
-    btn.disabled = false;
-    input.focus();
-  }
-</script>
+      // Refresh only the list, so mobile and collapse handlers are bound once.
+      function updateThreads() {
+        const template = document.createElement('template');
+        template.innerHTML = B.renderRail({ ...railOptions, threads });
+        const list = template.content.querySelector('#rail-threads');
+        list.querySelectorAll('.row-more').forEach(node => node.remove());
+        B.el('rail-threads').replaceChildren(...list.childNodes);
+      }
+      B.el('rail-threads').addEventListener('click', event => {
+        const button = event.target.closest('[data-thread]');
+        if (!button) return;
+        closeRail();
+        const row = B.el(button.dataset.thread);
+        if (row) {
+          home.classList.add('hidden');
+          chat.classList.remove('hidden');
+          row.focus({ preventScroll: true });
+          row.scrollIntoView({ block: 'start' });
+        }
+      });
+      rail.querySelectorAll('.rail-folder').forEach((folder, index) => {
+        folder.addEventListener('click', event => {
+          event.preventDefault();
+          input.value = ['What is the policy on time and attendance?', 'What is the policy on expenses and travel?', 'What is the policy on workplace conduct?'][index];
+          input.dispatchEvent(new Event('input'));
+          closeRail(); input.focus();
+        });
+      });
+      rail.querySelector('a[href="/"]').addEventListener('click', event => {
+        event.preventDefault(); resetChat();
+      });
+      rail.querySelector('a[href="/#chats"]').addEventListener('click', event => {
+        event.preventDefault(); closeRail();
+        if (threads.length) { chat.focus(); scrollDown(); }
+        else input.focus();
+      });
+      B.el('rail-search-btn').addEventListener('click', () => { closeRail(); input.focus(); });
+      B.el('new-chat-btn').addEventListener('click', resetChat);
+      B.el('new-question-btn').addEventListener('click', resetChat);
+
+      function updateSend() {
+        send.disabled = !!pending || !input.value.trim();
+        messages.querySelectorAll('[data-action="regenerate"]').forEach(button => { button.disabled = !!pending; });
+      }
+      function resetChat() {
+        if (pending) pending.abort();
+        pending = null;
+        if (recognition && listening) recognition.abort();
+        if (canSpeak) window.speechSynthesis.cancel();
+        messages.replaceChildren();
+        threads = [];
+        updateThreads();
+        home.classList.remove('hidden');
+        chat.classList.add('hidden');
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        closeRail(); input.focus();
+      }
+      function scrollDown() { chat.scrollTop = chat.scrollHeight; }
+
+      // Escape the entire answer before adding our small, fixed set of tags.
+      function renderAnswer(text) {
+        const lines = B.escHtml(text).split(/\r?\n/);
+        let html = '';
+        let inList = false;
+        for (const rawLine of lines) {
+          const line = rawLine.trim();
+          if (line.startsWith('- ')) {
+            if (!inList) { html += '<ul>'; inList = true; }
+            html += '<li>' + line.slice(2) + '</li>';
+          } else {
+            if (inList) { html += '</ul>'; inList = false; }
+            if (headers.has(line)) html += '<h4>' + line + '</h4>';
+            else if (line) html += '<p>' + line + '</p>';
+          }
+        }
+        return html + (inList ? '</ul>' : '');
+      }
+      function actionButton(action, label, icon) {
+        return '<button type="button" class="msg-action" data-action="' + action + '" aria-label="' + label + '" title="' + label + '">' + icon(15) + '</button>';
+      }
+      function appendBot(answer, rowsFound, question, isError = false) {
+        const row = document.createElement('article');
+        row.className = 'msg from-bot' + (isError ? ' is-error' : '');
+        row.setAttribute('aria-label', isError ? 'Policy Badger error' : 'Policy Badger answer');
+        row.innerHTML = '<div class="msg-avatar bot" aria-hidden="true">' + B.mark(15) + '</div>' +
+          '<div class="msg-col"><div class="bubble">' + renderAnswer(answer) + '</div>' +
+          '<div class="msg-meta wrap"><span>' + B.escHtml(B.timeNow()) + '</span>' +
+          (isError ? '' : '<span aria-hidden="true">' + icons.checkDouble(14) + '</span><span class="chip-count">' + B.escHtml(rowsFound) + ' policy records matched</span>') + '</div>' +
+          '<div class="msg-actions">' + actionButton('regenerate', 'Regenerate answer', icons.refresh) +
+          (canSpeak ? actionButton('speak', 'Read answer aloud', icons.speaker) : '') +
+          actionButton('copy', 'Copy answer', icons.copy) + actionButton('feedback', 'Mark answer unhelpful', icons.thumbDown) + '</div></div>';
+        row.querySelector('[data-action="regenerate"]').addEventListener('click', () => ask(question));
+        const speak = row.querySelector('[data-action="speak"]');
+        if (speak) speak.addEventListener('click', () => {
+          window.speechSynthesis.cancel();
+          window.speechSynthesis.speak(new SpeechSynthesisUtterance(answer));
+        });
+        row.querySelector('[data-action="copy"]').addEventListener('click', async event => {
+          const button = event.currentTarget;
+          try {
+            await navigator.clipboard.writeText(answer);
+            button.innerHTML = icons.check(15);
+            button.classList.add('done');
+            button.setAttribute('aria-label', 'Answer copied');
+            setTimeout(() => {
+              button.innerHTML = icons.copy(15);
+              button.classList.remove('done');
+              button.setAttribute('aria-label', 'Copy answer');
+            }, 1600);
+          } catch { B.toast('Could not copy. Please select and copy the answer text.', 'error'); }
+        });
+        row.querySelector('[data-action="feedback"]').addEventListener('click', () => B.toast('Thanks — feedback noted.'));
+        messages.appendChild(row);
+        scrollDown();
+      }
+      async function ask(text) {
+        const question = text.trim();
+        if (!question || pending) return;
+        if (recognition && listening) recognition.abort();
+        const request = new AbortController();
+        pending = request;
+        const id = 'question-' + (++sequence);
+        home.classList.add('hidden');
+        chat.classList.remove('hidden');
+        const row = document.createElement('article');
+        row.className = 'msg from-user';
+        row.id = id;
+        row.tabIndex = -1;
+        row.setAttribute('aria-label', 'Your question');
+        row.innerHTML = '<div class="msg-avatar user" aria-hidden="true">' + B.escHtml(initials) + '</div>' +
+          '<div class="msg-col"><div class="bubble">' + B.escHtml(question).replace(/\n/g, '<br>') + '</div></div>';
+        messages.appendChild(row);
+        threads.unshift({ id, label: question.slice(0, 42), group: 'Today' });
+        updateThreads();
+        input.value = '';
+        input.dispatchEvent(new Event('input'));
+        input.focus();
+        const typing = document.createElement('div');
+        typing.className = 'msg from-bot';
+        typing.innerHTML = '<div class="msg-avatar bot" aria-hidden="true">' + B.mark(15) + '</div>' +
+          '<div class="typing" role="status" aria-label="Searching published policies"><i></i><i></i><i></i></div>';
+        messages.appendChild(typing);
+        scrollDown();
+        try {
+          const response = await fetch('/ask', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ question }),
+            signal: request.signal
+          });
+          const data = await response.json();
+          if (pending !== request) return;
+          typing.remove();
+          if (!response.ok || data.error) {
+            appendBot('Sorry, I couldn’t answer that question. ' + (data.error || 'Please try again in a moment.'), null, question, true);
+          } else if (typeof data.answer !== 'string' || !Number.isInteger(data.rows_found)) {
+            throw new Error('Invalid answer response');
+          } else {
+            appendBot(data.answer, data.rows_found, question);
+          }
+        } catch (error) {
+          if (pending !== request || error.name === 'AbortError') return;
+          typing.remove();
+          appendBot('Sorry, I couldn’t reach the policy service. Please try again in a moment.', null, question, true);
+        } finally {
+          typing.remove();
+          if (pending === request) { pending = null; updateSend(); }
+        }
+      }
+      input.addEventListener('input', updateSend);
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+          event.preventDefault(); ask(input.value);
+        }
+      });
+      B.el('composer').addEventListener('submit', event => { event.preventDefault(); ask(input.value); });
+      document.querySelectorAll('.starter').forEach(button => {
+        button.addEventListener('click', () => ask(button.dataset.question));
+      });
+      if (window.webkitSpeechRecognition) {
+        recognition = new window.webkitSpeechRecognition();
+        recognition.lang = document.documentElement.lang;
+        recognition.interimResults = false;
+        mic.classList.remove('hidden');
+        recognition.onstart = () => {
+          listening = true;
+          mic.setAttribute('aria-pressed', 'true');
+          mic.setAttribute('aria-label', 'Stop dictation');
+          B.toast('Listening — ask your policy question.');
+        };
+        recognition.onend = () => {
+          listening = false;
+          mic.setAttribute('aria-pressed', 'false');
+          mic.setAttribute('aria-label', 'Dictate a question');
+        };
+        recognition.onresult = event => {
+          input.value = (input.value + (input.value ? ' ' : '') + event.results[0][0].transcript).slice(0, input.maxLength);
+          input.dispatchEvent(new Event('input'));
+          input.focus();
+        };
+        recognition.onerror = event => {
+          if (event.error !== 'aborted') B.toast('Dictation is unavailable. Please type your question instead.', 'error');
+        };
+        mic.addEventListener('click', () => {
+          try { if (listening) recognition.stop(); else recognition.start(); }
+          catch { B.toast('Dictation could not start. Please try again.', 'error'); }
+        });
+      }
+      updateSend();
+    });
+  </script>
 </body>
 </html>

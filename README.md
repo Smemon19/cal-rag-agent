@@ -1,6 +1,6 @@
-# Policy Badger
+# Policy Badger - Raymond
 
-Policy Badger is a structured policy question-answering app backed by PostgreSQL. It answers user questions by planning a constrained database search, building safe SQL, retrieving rows from `policies_v2`, and formatting a grounded answer from those rows.
+Policy Badger - Raymond is a structured policy question-answering app backed by PostgreSQL. It answers user questions by planning a constrained database search, building safe SQL, retrieving rows from `policies_v2`, and formatting a grounded answer from those rows.
 
 The current system is centered on the `src/policy_badger/engine/` and `src/policy_badger/ingestion/` packages.
 

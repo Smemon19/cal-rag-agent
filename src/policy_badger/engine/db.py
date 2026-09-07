@@ -1,4 +1,4 @@
-"""PostgreSQL access for Policy Badger using psycopg2."""
+"""PostgreSQL access for Policy Badger - Raymond using psycopg2."""
 
 import os
 from pathlib import Path

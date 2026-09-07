@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings — Policy Badger - Raymond</title>
+  <link rel="stylesheet" href="/assets/css/badger.css" />
+  <script defer src="/assets/js/badger.js"></script>
+  <style>
+    /* Settings-specific layout: two working columns + a settings rail. */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 292px;
+      gap: 18px;
+      align-items: start;
+    }
+    .col-card {
+      display: flex;
+      flex-direction: column;
+      min-height: 430px;
+    }
+    .prompt-list { display: flex; flex-direction: column; gap: 10px; }
+    .prompt-item {
+      position: relative;
+      padding: 14px 40px 14px 15px;
+      border-radius: var(--r-md);
+      background: var(--paper-2);
+      border: 1px solid var(--line);
+      font-size: 13px;
+      line-height: 1.55;
+      color: var(--ink-2);
+      transition: border-color .15s ease, background .15s ease;
+    }
+    .prompt-item:hover { border-color: var(--line-2); background: var(--paper-3); }
+    .prompt-item .kill {
+      position: absolute;
+      top: 9px;
+      right: 9px;
+      width: 24px;
+      height: 24px;
+      border-radius: 7px;
+      display: grid;
+      place-items: center;
+      color: var(--ink-faint);
+      opacity: 0;
+      transition: opacity .14s ease, background .14s ease, color .14s ease;
+    }
+    .prompt-item:hover .kill { opacity: 1; }
+    .prompt-item .kill:hover { background: var(--danger-soft); color: var(--danger); }
+
+    .rail-card { padding: 20px; position: sticky; top: 0; }
+    .rail-field { margin-bottom: 18px; }
+    .rail-field:last-child { margin-bottom: 0; }
+    .rail-field > .field-label { display: flex; align-items: center; justify-content: space-between; }
+    .rail-field .val { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
+    .select-mark {
+      position: relative;
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+    .select-mark .glyph {
+      position: absolute;
+      left: 12px;
+      display: grid;
+      place-items: center;
+      color: var(--violet);
+      pointer-events: none;
+    }
+    .select-mark .select { padding-left: 36px; }
+
+    .account-row {
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      padding: 13px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .account-row:last-child { border-bottom: none; }
+    .account-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--violet-soft);
+      color: var(--violet);
+      display: grid;
+      place-items: center;
+      font-weight: 600;
+      font-size: 14px;
+      flex: 0 0 auto;
+    }
+    .toggle-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+    .toggle-row:last-child { border-bottom: none; }
+    .toggle-row .t-name { font-size: 13.5px; font-weight: 500; color: var(--ink); }
+    .toggle-row .t-desc { font-size: 12px; color: var(--ink-faint); margin-top: 2px; line-height: 1.5; }
+
+    @media (max-width: 1180px) {
+      .settings-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+      .rail-card { grid-column: 1 / -1; position: static; }
+    }
+    @media (max-width: 820px) {
+      .settings-grid { grid-template-columns: 1fr; }
+      .col-card { min-height: 0; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="app">
+  <div id="rail-host"></div>
+
+  <main class="canvas">
+
+    <header class="topbar">
+      <div class="row">
+        <button class="icon-btn on-light rail-toggle" id="rail-toggle" aria-label="Open navigation"></button>
+        <div class="wordmark">Policy Badger<span class="sub">Raymond</span></div>
+      </div>
+      <div class="topbar-actions">
+        <span class="badge violet" id="role-badge" hidden></span>
+        <a class="btn btn-ghost" href="/">Back to Chat</a>
+        <button class="btn btn-lime" id="save-btn" disabled>
+          <span id="save-icon"></span> Save changes
+        </button>
+      </div>
+    </header>
+
+    <div class="sheet scroll-y on-light">
+      <div class="sheet-inner">
+
+        <!-- Identity strip -->
+        <div class="card">
+          <div class="row-between">
+            <div class="row">
+              <span style="color:var(--violet)" id="head-mark"></span>
+              <div>
+                <div class="card-title" style="font-size:17px;">Policy Badger</div>
+                <div class="card-sub">Tune how the assistant answers for your account.</div>
+              </div>
+            </div>
+            <span class="badge neutral" id="dirty-hint">All changes saved</span>
+          </div>
+        </div>
+
+        <div class="settings-grid">
+
+          <!-- ── Saved questions ─────────────────────────────────────── -->
+          <section class="card col-card">
+            <div class="card-head">
+              <div class="card-title" id="t-prompts">Saved questions</div>
+              <button class="btn btn-sm btn-ghost" id="add-prompt">Add question</button>
+            </div>
+            <p class="tiny faint mb-16" style="margin-top:-8px;">
+              These appear as one-tap starters on your home screen.
+            </p>
+            <div class="prompt-list" id="prompt-list"></div>
+          </section>
+
+          <!-- ── Answer style ────────────────────────────────────────── -->
+          <section class="card col-card">
+            <div class="card-head">
+              <div class="card-title" id="t-style">Answer style</div>
+              <span class="tiny faint" id="style-count"></span>
+            </div>
+            <p class="tiny faint mb-16" style="margin-top:-8px;">
+              Pick the traits the assistant should lean on when it writes an answer.
+            </p>
+            <div class="chip-wrap" id="style-chips"></div>
+
+            <div class="section-label mt-24">Behaviour</div>
+            <div class="toggle-row">
+              <div>
+                <div class="t-name">Always show source quotes</div>
+                <div class="t-desc">Include the verbatim policy text each answer relies on.</div>
+              </div>
+              <button class="switch on" data-toggle="sources" aria-label="Toggle source quotes"></button>
+            </div>
+            <div class="toggle-row">
+              <div>
+                <div class="t-name">Say when nothing was found</div>
+                <div class="t-desc">Prefer an honest "not covered" over a loosely related answer.</div>
+              </div>
+              <button class="switch on" data-toggle="honest" aria-label="Toggle honest misses"></button>
+            </div>
+            <div class="toggle-row">
+              <div>
+                <div class="t-name">Show matched record count</div>
+                <div class="t-desc">Display how many policy rows backed each response.</div>
+              </div>
+              <button class="switch on" data-toggle="counts" aria-label="Toggle record count"></button>
+            </div>
+          </section>
+
+          <!-- ── Settings rail ───────────────────────────────────────── -->
+          <aside class="card rail-card">
+            <div class="rail-field">
+              <label class="field-label" for="s-preset">Preset</label>
+              <div class="select-mark">
+                <span class="glyph" id="glyph-preset"></span>
+                <select class="select" id="s-preset">
+                  <option value="balanced">Balanced</option>
+                  <option value="strict">Strict &amp; literal</option>
+                  <option value="coaching">Explain like a manager</option>
+                  <option value="brief">Brief</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="rail-field">
+              <label class="field-label" for="s-format">Response format</label>
+              <select class="select" id="s-format">
+                <option value="structured">Structured sections</option>
+                <option value="prose">Plain paragraphs</option>
+                <option value="bullets">Bullets only</option>
+              </select>
+            </div>
+
+            <div class="rail-field">
+              <label class="field-label" for="s-length">
+                Answer length <span class="val" id="v-length">Medium</span>
+              </label>
+              <input class="range" type="range" id="s-length" min="0" max="2" step="1" value="1" />
+            </div>
+
+            <div class="rail-field">
+              <label class="field-label" for="s-precision">
+                Precision <span class="val" id="v-precision">0.1</span>
+              </label>
+              <input class="range" type="range" id="s-precision" min="0" max="10" step="1" value="1" />
+              <p class="tiny faint mt-8" style="margin-bottom:0;">
+                Lower sticks closer to the exact policy wording.
+              </p>
+            </div>
+
+            <div class="rail-field">
+              <label class="field-label" for="s-reading">Reading level</label>
+              <select class="select" id="s-reading">
+                <option value="plain">Plain English</option>
+                <option value="standard">Standard</option>
+                <option value="formal">Formal / policy voice</option>
+              </select>
+            </div>
+
+            <div class="rail-divider" style="background:var(--line); margin:18px 0;"></div>
+
+            <div class="section-label">Your account</div>
+            <div class="account-row">
+              <div class="account-avatar" id="acct-initials">–</div>
+              <div class="grow">
+                <div class="strong small" id="acct-name">Loading…</div>
+                <div class="tiny faint" id="acct-role"></div>
+              </div>
+            </div>
+            <a class="btn btn-ghost btn-block btn-sm mt-16" href="/change-password">
+              <span id="glyph-key"></span> Change password
+            </a>
+            <a class="btn btn-quiet btn-block btn-sm mt-8" href="/logout">
+              <span id="glyph-out"></span> Log out
+            </a>
+          </aside>
+
+        </div>
+
+        <p class="tiny faint mt-16" style="text-align:center;">
+          Preferences are stored on this device. Published policy content is unaffected by these settings.
+        </p>
+      </div>
+    </div>
+  </main>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  var STORE_KEY = "badger.settings.v1";
+
+  var DEFAULTS = {
+    prompts: [
+      "What is the deadline for submitting timesheets?",
+      "How do I submit an expense report?",
+      "How do I request paid time off?",
+      "Do I need approval for professional development?"
+    ],
+    styles: ["Concise", "Cite sources", "Step-by-step"],
+    toggles: { sources: true, honest: true, counts: true },
+    preset: "balanced",
+    format: "structured",
+    length: 1,
+    precision: 1,
+    reading: "plain"
+  };
+
+  var ALL_STYLES = [
+    "Concise", "Detailed", "Step-by-step", "Cite sources", "Plain language",
+    "Formal", "Friendly", "Bullet points", "Lead with yes/no", "Flag exceptions",
+    "Name the approver", "Include deadlines", "Show dollar limits", "Compare options"
+  ];
+
+  var state = load();
+  var dirty = false;
+
+  function load() {
+    try {
+      var raw = localStorage.getItem(STORE_KEY);
+      if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
+      var parsed = JSON.parse(raw);
+      // Merge so a newly added default never comes back undefined.
+      return Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), parsed, {
+        toggles: Object.assign({}, DEFAULTS.toggles, parsed.toggles || {})
+      });
+    } catch (e) {
+      return JSON.parse(JSON.stringify(DEFAULTS));
+    }
+  }
+
+  function markDirty() {
+    dirty = true;
+    Badger.el("save-btn").disabled = false;
+    var hint = Badger.el("dirty-hint");
+    hint.textContent = "Unsaved changes";
+    hint.className = "badge warn";
+  }
+
+  function markClean() {
+    dirty = false;
+    Badger.el("save-btn").disabled = true;
+    var hint = Badger.el("dirty-hint");
+    hint.textContent = "All changes saved";
+    hint.className = "badge neutral";
+  }
+
+  /* ── Saved questions ──────────────────────────────────────────────────── */
+  function renderPrompts() {
+    var host = Badger.el("prompt-list");
+    if (!state.prompts.length) {
+      host.innerHTML = '<div class="empty">No saved questions yet.</div>';
+      return;
+    }
+    host.innerHTML = state.prompts.map(function (p, i) {
+      return '<div class="prompt-item">' + Badger.escHtml(p) +
+             '<button class="kill" data-kill="' + i + '" aria-label="Remove question">' +
+             Badger.Icons.x(13) + "</button></div>";
+    }).join("");
+
+    host.querySelectorAll("[data-kill]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        state.prompts.splice(parseInt(b.getAttribute("data-kill"), 10), 1);
+        renderPrompts();
+        markDirty();
+      });
+    });
+  }
+
+  function onAddPrompt() {
+    var text = window.prompt("New starter question");
+    if (!text) return;
+    text = text.trim();
+    if (!text) return;
+    if (state.prompts.length >= 8) {
+      Badger.toast("You can save up to 8 starter questions.", "warn");
+      return;
+    }
+    state.prompts.push(text);
+    renderPrompts();
+    markDirty();
+  }
+
+  /* ── Style chips ──────────────────────────────────────────────────────── */
+  function renderStyles() {
+    var host = Badger.el("style-chips");
+    host.innerHTML = ALL_STYLES.map(function (s) {
+      var on = state.styles.indexOf(s) !== -1;
+      return '<button class="chip' + (on ? " on" : "") + '" data-style="' +
+             Badger.escHtml(s) + '" aria-pressed="' + on + '">' +
+             Badger.escHtml(s) + "</button>";
+    }).join("");
+
+    host.querySelectorAll("[data-style]").forEach(function (c) {
+      c.addEventListener("click", function () {
+        var name = c.getAttribute("data-style");
+        var at = state.styles.indexOf(name);
+        if (at === -1) state.styles.push(name); else state.styles.splice(at, 1);
+        renderStyles();
+        markDirty();
+      });
+    });
+    Badger.el("style-count").textContent = state.styles.length + " selected";
+  }
+
+  /* ── Toggles ──────────────────────────────────────────────────────────── */
+  function bindToggles() {
+    document.querySelectorAll("[data-toggle]").forEach(function (t) {
+      var key = t.getAttribute("data-toggle");
+      t.classList.toggle("on", !!state.toggles[key]);
+      t.setAttribute("aria-pressed", String(!!state.toggles[key]));
+      t.addEventListener("click", function () {
+        state.toggles[key] = !state.toggles[key];
+        t.classList.toggle("on", state.toggles[key]);
+        t.setAttribute("aria-pressed", String(state.toggles[key]));
+        markDirty();
+      });
+    });
+  }
+
+  /* ── Rail controls ────────────────────────────────────────────────────── */
+  var LENGTHS = ["Short", "Medium", "Thorough"];
+
+  function bindSelect(id, key) {
+    var node = Badger.el(id);
+    node.value = state[key];
+    node.addEventListener("change", function () {
+      state[key] = node.value;
+      markDirty();
+    });
+  }
+
+  function bindControls() {
+    bindSelect("s-preset", "preset");
+    bindSelect("s-format", "format");
+    bindSelect("s-reading", "reading");
+
+    var lenEl = Badger.el("s-length");
+    lenEl.value = state.length;
+    Badger.el("v-length").textContent = LENGTHS[state.length];
+    lenEl.addEventListener("input", function () {
+      state.length = parseInt(lenEl.value, 10);
+      Badger.el("v-length").textContent = LENGTHS[state.length];
+      markDirty();
+    });
+
+    var precEl = Badger.el("s-precision");
+    precEl.value = state.precision;
+    Badger.el("v-precision").textContent = (state.precision / 10).toFixed(1);
+    precEl.addEventListener("input", function () {
+      state.precision = parseInt(precEl.value, 10);
+      Badger.el("v-precision").textContent = (state.precision / 10).toFixed(1);
+      markDirty();
+    });
+
+    Badger.el("add-prompt").addEventListener("click", onAddPrompt);
+
+    Badger.el("save-btn").addEventListener("click", function () {
+      try {
+        localStorage.setItem(STORE_KEY, JSON.stringify(state));
+        markClean();
+        Badger.toast("Settings saved.");
+      } catch (e) {
+        Badger.toast("Could not save settings on this device.", "error");
+      }
+    });
+  }
+
+  window.addEventListener("beforeunload", function (e) {
+    if (!dirty) return;
+    e.preventDefault();
+    e.returnValue = "";
+  });
+
+  /* ── Boot ─────────────────────────────────────────────────────────────── */
+  function initials(name) {
+    var parts = String(name || "").split(/[.\s_-]+/).filter(Boolean);
+    if (!parts.length) return "?";
+    return (parts[0][0] + (parts[1] ? parts[1][0] : "")).toUpperCase();
+  }
+
+  document.addEventListener("DOMContentLoaded", async function () {
+    Badger.el("head-mark").innerHTML = Badger.mark(28);
+    Badger.el("save-icon").innerHTML = Badger.Icons.check(15);
+    Badger.el("glyph-preset").innerHTML = Badger.Icons.sparkle(15);
+    Badger.el("glyph-key").innerHTML = Badger.Icons.key(15);
+    Badger.el("glyph-out").innerHTML = Badger.Icons.logout(15);
+    Badger.el("rail-toggle").innerHTML = Badger.Icons.menu(18);
+
+    var user = await Badger.me();
+
+    Badger.el("rail-host").outerHTML = Badger.renderRail({
+      active: "settings",
+      user: user,
+      folders: [
+        { label: "Time & Attendance", spine: "var(--mint)" },
+        { label: "Expenses & Travel", spine: "var(--amber)" },
+        { label: "HR & Conduct", spine: "var(--rose)" }
+      ],
+      threads: []
+    });
+    Badger.bindRail();
+
+    var newChat = Badger.el("new-chat-btn");
+    if (newChat) newChat.addEventListener("click", function () { window.location.href = "/"; });
+    var search = Badger.el("rail-search-btn");
+    if (search) search.addEventListener("click", function () { window.location.href = "/"; });
+
+    if (user) {
+      Badger.el("acct-name").textContent = user.username || "Signed in";
+      Badger.el("acct-role").textContent = Badger.roleLabel(user.role);
+      Badger.el("acct-initials").textContent = initials(user.username);
+      var rb = Badger.el("role-badge");
+      rb.textContent = Badger.roleLabel(user.role);
+      rb.hidden = false;
+    }
+
+    bindToggles();
+    bindControls();
+    renderPrompts();
+    renderStyles();
+    markClean();
+  });
+})();
+</script>
+</body>
+</html>
