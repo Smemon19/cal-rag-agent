@@ -34,3 +34,8 @@ installer/
 
 # Ignored by the build system
 /setup.cfg
+
+# Local diagnostic and vector-store artifacts (hundreds of MB; never needed in
+# the image or the build upload).
+chroma_db/
+docs/diag_run_*/

@@ -108,3 +108,7 @@ Thumbs.db
 tmp_*.json
 
 .pip-cache/
+
+# Local vector store and OCR diagnostic artifacts (hundreds of MB, machine-local)
+chroma_db/
+docs/diag_run_*/

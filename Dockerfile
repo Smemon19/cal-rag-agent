@@ -5,6 +5,7 @@ FROM python:3.11-slim
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        curl ca-certificates libgl1 libglib2.0-0 \
+       tesseract-ocr \
     && rm -rf /var/lib/lists/*
 
 ENV PIP_NO_CACHE_DIR=1 \

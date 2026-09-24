@@ -21,4 +21,6 @@ google-cloud-bigquery
 python-docx
 pdfplumber
 PyMuPDF
+pytesseract
+Pillow
 PyYAML
