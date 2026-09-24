@@ -15,6 +15,7 @@ from policy_badger.ingestion.pipeline import AdaptiveIngestionPipeline, Ingestio
 from policy_badger.engine.db import run_query
 from policy_badger.engine.formatter import format_answer
 from policy_badger.engine.planner import fetch_db_context, plan_search
+from policy_badger.engine.settings_db import build_answer_directives
 from policy_badger.engine.query_builder import build_query_from_spec, build_text_fallback_query, relaxed_specs_in_order
 from policy_badger.engine.synonyms import expand_question
 
@@ -90,7 +91,13 @@ def _offline_rows_for_question(question: str, limit: int = 10) -> list[dict[str,
     return [r for _, r in scored[:limit]]
 
 
-def answer_policy_question(question: str, *, batch_id: str | None = None, document_id: str | None = None) -> dict[str, Any]:
+def answer_policy_question(
+    question: str,
+    *,
+    batch_id: str | None = None,
+    document_id: str | None = None,
+    settings: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     End-to-end policy Q&A against policies_v2.
 
@@ -100,10 +107,15 @@ def answer_policy_question(question: str, *, batch_id: str | None = None, docume
     3. Run query.
     4. If zero rows, try relaxed specs in order (drop activity_type, then category+status only).
     5. Formatter LLM produces the user-facing answer from rows only.
+
+    ``settings`` holds the asking user's saved answer preferences; they only
+    affect step 5's presentation, never which rows are retrieved.
     """
     q = (question or "").strip()
     if not q:
         raise ValueError("Question is empty.")
+
+    directives = build_answer_directives(settings or {})
 
     # Step 1–2: planner validates/normalizes the spec internally.
     # Ground the planner in real DB values so it doesn't guess filter values.
@@ -126,7 +138,7 @@ def answer_policy_question(question: str, *, batch_id: str | None = None, docume
         rows = run_query(sql, params)
     except Exception as db_error:
         rows = _offline_rows_for_question(q)
-        answer = format_answer(q, rows, intent=search_spec.get("intent"))
+        answer = format_answer(q, rows, intent=search_spec.get("intent"), directives=directives)
         return {
             "question": q,
             "search_spec": search_spec,
@@ -173,7 +185,7 @@ def answer_policy_question(question: str, *, batch_id: str | None = None, docume
                 text_fallback_params = list(params_t)
 
     # Step 5: answer from rows only
-    answer = format_answer(q, rows, intent=search_spec.get("intent"))
+    answer = format_answer(q, rows, intent=search_spec.get("intent"), directives=directives)
 
     return {
         "question": q,

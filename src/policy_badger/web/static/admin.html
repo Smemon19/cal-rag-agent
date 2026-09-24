@@ -30,6 +30,8 @@
             <div class="tabs mb-24" role="tablist" aria-label="Admin tools">
               <button type="button" class="tab active" role="tab" id="tab-studio-btn" aria-controls="tab-studio" aria-selected="true" data-tab="studio"><span data-icon="layers" aria-hidden="true"></span>Policy Studio</button>
               <button type="button" class="tab" role="tab" id="tab-users-btn" aria-controls="tab-users" aria-selected="false" tabindex="-1" data-tab="users"><span data-icon="users" aria-hidden="true"></span>Team Access</button>
+              <button type="button" class="tab" role="tab" id="tab-library-btn" aria-controls="tab-library" aria-selected="false" tabindex="-1" data-tab="library"><span data-icon="doc" aria-hidden="true"></span>Policy Library</button>
+              <button type="button" class="tab hidden" role="tab" id="tab-audit-btn" aria-controls="tab-audit" aria-selected="false" tabindex="-1" data-tab="audit"><span data-icon="layers" aria-hidden="true"></span>Audit Log</button>
             </div>
             <section id="tab-studio" class="tab-panel active" role="tabpanel" aria-labelledby="tab-studio-btn" tabindex="0">
               <div class="stepper" id="step-tracker" role="list" aria-label="Policy publishing progress">
@@ -41,6 +43,57 @@
                 <div class="step-bar" id="line-3" aria-hidden="true"></div>
                 <div class="step" role="listitem"><span class="step-dot" id="sc-4">4</span><span class="step-name" id="sl-4">Published</span></div>
               </div>
+              <section class="card" id="upload-card" aria-labelledby="upload-title">
+                <h1 class="card-title mt-0 mb-16" id="upload-title"><span data-icon="layers" aria-hidden="true"></span>Upload a Document</h1>
+                <p class="muted mt-0">Upload a handbook or policy document (PDF, DOCX, TXT or MD). Policy Badger reads it, extracts every policy it contains, and shows you which are new versus already in the database. Nothing is added until you choose.</p>
+                <div class="grid-4">
+                  <div class="field mb-0" style="grid-column: span 2;">
+                    <label class="field-label" for="upload-file">Document</label>
+                    <input type="file" class="input" id="upload-file" accept=".pdf,.docx,.txt,.md">
+                  </div>
+                  <div class="field mb-0" style="grid-column: span 2;">
+                    <label class="field-label" for="upload-title-input">Document title <span class="optional">(optional)</span></label>
+                    <input type="text" class="input" id="upload-title-input" placeholder="e.g., Employee Handbook 2026">
+                  </div>
+                </div>
+                <div class="row wrap mt-24">
+                  <button type="button" class="btn btn-violet" id="upload-btn"><span data-icon="sparkle" aria-hidden="true"></span>Read Document</button>
+                  <div class="loading-row hidden" id="upload-loading" role="status"><span class="spinner" aria-hidden="true"></span>Reading the document and comparing against published policies…</div>
+                </div>
+              </section>
+
+              <section class="card hidden" id="review-card" aria-labelledby="review-title">
+                <div class="card-head wrap">
+                  <h1 class="card-title mt-0 mb-0" id="review-title"><span data-icon="check" aria-hidden="true"></span>Review Extracted Policies</h1>
+                  <span id="review-summary" class="small muted"></span>
+                </div>
+                <div class="row wrap mt-16">
+                  <button type="button" class="btn btn-sm btn-ghost" id="review-select-new">Select all new</button>
+                  <button type="button" class="btn btn-sm btn-ghost" id="review-select-none">Clear selection</button>
+                  <label class="small muted" style="display:flex;align-items:center;gap:6px;">
+                    <input type="checkbox" id="review-hide-dupes" checked> Hide duplicates
+                  </label>
+                </div>
+                <div class="alert alert-info mt-16">
+                  Matching is based on wording. A policy that was rewritten from scratch may appear as
+                  <strong>New</strong> rather than <strong>Updates existing</strong> — ingest it, then retire the old
+                  version from the Policy Library tab.
+                </div>
+                <div class="table-scroll mt-16" tabindex="0" role="region" aria-label="Extracted policies awaiting review">
+                  <table class="table">
+                    <thead><tr><th scope="col"><span class="sr-only">Select</span></th><th scope="col">Status</th><th scope="col">Topic</th><th scope="col">Policy</th><th scope="col">Already in database</th></tr></thead>
+                    <tbody id="review-tbody"></tbody>
+                  </table>
+                </div>
+                <div class="row wrap mt-24">
+                  <button type="button" class="btn btn-violet" id="review-publish-btn">Ingest Selected</button>
+                  <button type="button" class="btn btn-ghost" id="review-discard-btn">Discard This Upload</button>
+                  <div class="loading-row hidden" id="review-loading" role="status"><span class="spinner" aria-hidden="true"></span>Publishing…</div>
+                </div>
+              </section>
+
+              <div class="rule-or mt-24 mb-24" aria-hidden="true"><span class="small muted">or add a single policy by hand</span></div>
+
               <section class="card" id="step-1" aria-labelledby="details-title">
                 <h1 class="card-title mt-0 mb-16" id="details-title"><span data-icon="doc" aria-hidden="true"></span>Policy Details</h1>
                 <div class="field">
@@ -119,6 +172,56 @@
                 </div>
               </section>
             </section>
+            <section id="tab-library" class="tab-panel" role="tabpanel" aria-labelledby="tab-library-btn" tabindex="0">
+              <section class="card" aria-labelledby="library-title">
+                <div class="card-head wrap">
+                  <h1 class="card-title mt-0 mb-0" id="library-title"><span data-icon="doc" aria-hidden="true"></span>Published Policies</h1>
+                  <span id="library-count" class="small muted"></span>
+                </div>
+                <div class="grid-4 mt-16">
+                  <div class="field mb-0"><label class="field-label" for="lib-search">Search</label><input type="search" class="input" id="lib-search" placeholder="Topic, condition, action, quote…"></div>
+                  <div class="field mb-0"><label class="field-label" for="lib-topic">Topic</label><select class="select" id="lib-topic"><option value="">All topics</option></select></div>
+                  <div class="field mb-0"><label class="field-label" for="lib-status">Status</label><select class="select" id="lib-status"><option value="">Active &amp; superseded</option><option value="active">Active</option><option value="superseded">Superseded</option><option value="archived">Archived</option></select></div>
+                  <div class="field mb-0"><label class="field-label" for="lib-refresh">&nbsp;</label><button type="button" class="btn btn-ghost" id="lib-refresh">Refresh</button></div>
+                </div>
+                <div class="table-scroll mt-16" tabindex="0" role="region" aria-label="Published policies">
+                  <table class="table">
+                    <thead><tr><th scope="col">Topic</th><th scope="col">Rule</th><th scope="col">Status</th><th scope="col">Updated</th><th scope="col">Actions</th></tr></thead>
+                    <tbody id="library-tbody"><tr><td colspan="5" class="empty">Loading policies…</td></tr></tbody>
+                  </table>
+                </div>
+                <div class="row wrap mt-16" id="library-pager" hidden>
+                  <button type="button" class="btn btn-sm btn-ghost" id="lib-prev">Previous</button>
+                  <span class="small muted" id="lib-page-label"></span>
+                  <button type="button" class="btn btn-sm btn-ghost" id="lib-next">Next</button>
+                </div>
+              </section>
+            </section>
+            <section id="tab-audit" class="tab-panel" role="tabpanel" aria-labelledby="tab-audit-btn" tabindex="0">
+              <section class="card" aria-labelledby="audit-title">
+                <div class="card-head wrap">
+                  <h1 class="card-title mt-0 mb-0" id="audit-title"><span data-icon="layers" aria-hidden="true"></span>Audit Log</h1>
+                  <span id="audit-count" class="small muted"></span>
+                </div>
+                <div class="grid-4 mt-16">
+                  <div class="field mb-0"><label class="field-label" for="audit-source">Stream</label><select class="select" id="audit-source"><option value="">All activity</option><option value="user">User management</option><option value="policy">Policy changes</option><option value="publish">Publishing</option></select></div>
+                  <div class="field mb-0"><label class="field-label" for="audit-action">Action</label><select class="select" id="audit-action"><option value="">All actions</option></select></div>
+                  <div class="field mb-0"><label class="field-label" for="audit-actor">Actor</label><input type="search" class="input" id="audit-actor" placeholder="Username"></div>
+                  <div class="field mb-0"><label class="field-label" for="audit-refresh">&nbsp;</label><button type="button" class="btn btn-ghost" id="audit-refresh">Refresh</button></div>
+                </div>
+                <div class="table-scroll mt-16" tabindex="0" role="region" aria-label="Audit events">
+                  <table class="table">
+                    <thead><tr><th scope="col">When</th><th scope="col">Actor</th><th scope="col">Action</th><th scope="col">Subject</th><th scope="col">Details</th></tr></thead>
+                    <tbody id="audit-tbody"><tr><td colspan="5" class="empty">Loading audit events…</td></tr></tbody>
+                  </table>
+                </div>
+                <div class="row wrap mt-16" id="audit-pager" hidden>
+                  <button type="button" class="btn btn-sm btn-ghost" id="audit-prev">Previous</button>
+                  <span class="small muted" id="audit-page-label"></span>
+                  <button type="button" class="btn btn-sm btn-ghost" id="audit-next">Next</button>
+                </div>
+              </section>
+            </section>
           </div>
         </div>
       </div>
@@ -134,11 +237,45 @@
       <div class="modal-foot"><button type="button" class="btn btn-ghost" id="reset-cancel">Cancel</button><button type="submit" class="btn btn-violet" id="reset-submit">Reset Password</button></div>
     </form>
   </div>
+  <div class="modal-veil" id="policy-modal">
+    <form class="modal" id="policy-form" role="dialog" aria-modal="true" aria-labelledby="policy-modal-title" novalidate>
+      <div class="modal-head"><h2 class="card-title mt-0 mb-0" id="policy-modal-title">Edit Policy</h2><button type="button" class="icon-btn on-light" id="policy-close" aria-label="Close policy editor"><span data-icon="x" aria-hidden="true"></span></button></div>
+      <div class="modal-body">
+        <p class="muted mt-0 small">Edits apply to the published policy immediately and are recorded in the audit log.</p>
+        <div id="policy-fields"></div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn btn-ghost" id="policy-cancel">Cancel</button><button type="submit" class="btn btn-violet" id="policy-save">Save Changes</button></div>
+    </form>
+  </div>
+  <div class="modal-veil" id="supersede-modal">
+    <form class="modal" id="supersede-form" role="dialog" aria-modal="true" aria-labelledby="supersede-title" novalidate>
+      <div class="modal-head"><h2 class="card-title mt-0 mb-0" id="supersede-title">Supersede Policy</h2><button type="button" class="icon-btn on-light" id="supersede-close" aria-label="Close"><span data-icon="x" aria-hidden="true"></span></button></div>
+      <div class="modal-body">
+        <p class="muted mt-0">The policy being replaced stops appearing in answers. Paste the policy ID of the version that replaces it.</p>
+        <div class="field"><label class="field-label" for="supersede-target">Replacement policy ID</label><input type="text" class="input" id="supersede-target" required></div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn btn-ghost" id="supersede-cancel">Cancel</button><button type="submit" class="btn btn-violet" id="supersede-submit">Supersede</button></div>
+    </form>
+  </div>
+  <div class="modal-veil" id="edit-user-modal">
+    <form class="modal" id="edit-user-form" role="dialog" aria-modal="true" aria-labelledby="edit-user-title" novalidate>
+      <div class="modal-head"><h2 class="card-title mt-0 mb-0" id="edit-user-title">Edit User</h2><button type="button" class="icon-btn on-light" id="edit-user-close" aria-label="Close user editor"><span data-icon="x" aria-hidden="true"></span></button></div>
+      <div class="modal-body">
+        <div class="field"><label class="field-label" for="edit-user-email">Email</label><input type="email" class="input" id="edit-user-email" autocomplete="off"></div>
+        <div class="field" id="edit-user-role-field"><label class="field-label" for="edit-user-role">Role</label><select class="select" id="edit-user-role"><option value="employee">Employee</option><option value="manager_admin">Manager Admin</option></select><p class="small muted mt-8">Changing a role takes effect within a minute, even for a user who is already signed in.</p></div>
+      </div>
+      <div class="modal-foot"><button type="button" class="btn btn-ghost" id="edit-user-cancel">Cancel</button><button type="submit" class="btn btn-violet" id="edit-user-submit">Save Changes</button></div>
+    </form>
+  </div>
   <div id="toasts" role="status" aria-live="polite" aria-atomic="false"></div>
   <script>
   document.addEventListener('DOMContentLoaded', () => {
+    const TAB_NAMES = ['studio', 'users', 'library', 'audit'];
+
     function switchTab(name, updateHash = true) {
-      name = name === 'users' ? 'users' : 'studio';
+      if (!TAB_NAMES.includes(name)) name = 'studio';
+      // The audit tab is super-admin only and stays hidden otherwise.
+      if (name === 'audit' && document.getElementById('tab-audit-btn').classList.contains('hidden')) name = 'studio';
       document.querySelectorAll('[data-tab]').forEach(button => {
         const active = button.dataset.tab === name;
         button.classList.toggle('active', active);
@@ -146,6 +283,8 @@
         button.tabIndex = active ? 0 : -1;
         document.getElementById('tab-' + button.dataset.tab).classList.toggle('active', active);
       });
+      if (name === 'library') loadPolicies();
+      if (name === 'audit') loadAudit();
       document.querySelectorAll('#rail a[href^="/admin#"]').forEach(link => {
         const active = link.hash === '#' + name;
         link.classList.toggle('active', active);
@@ -223,12 +362,20 @@
       button.addEventListener('keydown', event => {
         if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
         event.preventDefault();
-        const name = event.key === 'Home' ? 'studio' : event.key === 'End' ? 'users' : button.dataset.tab === 'studio' ? 'users' : 'studio';
+        const visible = TAB_NAMES.filter(t => !document.getElementById('tab-' + t + '-btn').classList.contains('hidden'));
+        const at = visible.indexOf(button.dataset.tab);
+        let name;
+        if (event.key === 'Home') name = visible[0];
+        else if (event.key === 'End') name = visible[visible.length - 1];
+        else {
+          const step = event.key === 'ArrowRight' ? 1 : -1;
+          name = visible[(at + step + visible.length) % visible.length];
+        }
         switchTab(name);
         document.getElementById('tab-' + name + '-btn').focus();
       });
     });
-    window.addEventListener('hashchange', () => switchTab(location.hash === '#users' ? 'users' : 'studio', false));
+    window.addEventListener('hashchange', () => switchTab(location.hash.slice(1), false));
     document.getElementById('extract-btn').addEventListener('click', extractPolicy);
     document.getElementById('clarify-btn').addEventListener('click', submitClarification);
     document.getElementById('preview-btn').addEventListener('click', previewPolicy);
@@ -242,6 +389,9 @@
     document.getElementById('reset-form').addEventListener('submit', submitResetPassword);
     document.getElementById('reset-close').addEventListener('click', closeResetModal);
     document.getElementById('reset-cancel').addEventListener('click', closeResetModal);
+    document.getElementById('edit-user-form').addEventListener('submit', submitEditUser);
+    document.getElementById('edit-user-close').addEventListener('click', closeEditUserModal);
+    document.getElementById('edit-user-cancel').addEventListener('click', closeEditUserModal);
     document.getElementById('reset-modal').addEventListener('click', event => {
       if (event.target.id === 'reset-modal') closeResetModal();
     });
@@ -512,13 +662,491 @@
       }
     }
 
+    // ── Document Upload & Review ─────────────────────────────
+    // Reads a handbook, then shows which extracted policies are new versus
+    // already published so the admin ingests only what is missing.
+    let reviewBatchId = null;
+    let reviewItems = [];
+    const reviewSelection = new Set();
+
+    const VERDICTS = {
+      new:           { label: 'New',            cls: 'ok',      hint: 'Not found in the database' },
+      update:        { label: 'Updates existing', cls: 'warn',  hint: 'Looks like a revision of a published policy' },
+      duplicate:     { label: 'Already exists',  cls: 'neutral', hint: 'A published policy already says this' },
+      unpublishable: { label: 'No rule found',   cls: 'neutral', hint: 'No policy rule in this section' }
+    };
+
+    function bindUpload() {
+      document.getElementById('upload-btn').addEventListener('click', uploadDocument);
+      document.getElementById('review-publish-btn').addEventListener('click', publishReviewed);
+      document.getElementById('review-discard-btn').addEventListener('click', discardReview);
+      document.getElementById('review-select-new').addEventListener('click', () => {
+        reviewItems.forEach(i => { if (i.verdict === 'new') reviewSelection.add(i.extraction_id); });
+        renderReview();
+      });
+      document.getElementById('review-select-none').addEventListener('click', () => {
+        reviewSelection.clear();
+        renderReview();
+      });
+      document.getElementById('review-hide-dupes').addEventListener('change', renderReview);
+    }
+
+    async function uploadDocument() {
+      const input = document.getElementById('upload-file');
+      const file = input.files && input.files[0];
+      if (!file) {
+        Badger.toast('Choose a document to upload first.', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('upload-btn');
+      const loading = document.getElementById('upload-loading');
+      btn.disabled = true;
+      loading.classList.remove('hidden');
+
+      const form = new FormData();
+      form.append('file', file);
+      const title = document.getElementById('upload-title-input').value.trim();
+      if (title) form.append('title', title);
+
+      try {
+        // FormData sets its own multipart boundary, so this one call does not
+        // go through Badger.api (which forces a JSON content type).
+        const res = await fetch('/api/admin/ingest/upload', { method: 'POST', body: form });
+        if (res.status === 401) { window.location.href = '/login'; return; }
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new Error((data && (data.detail || data.error)) || 'Upload failed.');
+
+        reviewBatchId = data.batch_id;
+        reviewItems = data.items || [];
+        reviewSelection.clear();
+        // Pre-select what is genuinely new; the admin can widen or narrow it.
+        reviewItems.forEach(i => { if (i.verdict === 'new') reviewSelection.add(i.extraction_id); });
+
+        const counts = data.counts || {};
+        document.getElementById('review-summary').textContent =
+          `${data.total || 0} extracted · ${counts.new || 0} new · ${counts.update || 0} revised · ${counts.duplicate || 0} already published`;
+        document.getElementById('review-card').classList.remove('hidden');
+        renderReview();
+        document.getElementById('review-card').scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+        if (!reviewItems.length) {
+          Badger.toast('No policies were found in that document.', 'warn');
+        } else {
+          Badger.toast(`Found ${counts.new || 0} new ${(counts.new === 1) ? 'policy' : 'policies'}.`, 'success');
+        }
+      } catch (e) {
+        Badger.toast(e.message || 'Could not read that document.', 'error');
+      } finally {
+        btn.disabled = false;
+        loading.classList.add('hidden');
+      }
+    }
+
+    function renderReview() {
+      const tbody = document.getElementById('review-tbody');
+      const hideDupes = document.getElementById('review-hide-dupes').checked;
+      const visible = reviewItems.filter(i =>
+        !hideDupes || (i.verdict !== 'duplicate' && i.verdict !== 'unpublishable'));
+
+      if (!visible.length) {
+        tbody.innerHTML = '<tr><td colspan="5" class="empty">Nothing to review with these filters.</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = '';
+      for (const item of visible) {
+        const meta = VERDICTS[item.verdict] || VERDICTS.new;
+        const selectable = item.verdict !== 'unpublishable';
+        const checked = reviewSelection.has(item.extraction_id) ? 'checked' : '';
+        const row = document.createElement('tr');
+        row.innerHTML = `
+          <td>${selectable
+            ? `<input type="checkbox" data-pick="${Badger.escHtml(item.extraction_id)}" ${checked} aria-label="Ingest this policy">`
+            : '<span class="faint">—</span>'}</td>
+          <td><span class="badge ${meta.cls}" title="${Badger.escHtml(meta.hint)}">${Badger.escHtml(meta.label)}</span>
+              ${item.score ? `<div class="tiny faint">${Math.round(item.score * 100)}% match</div>` : ''}</td>
+          <td class="strong">${Badger.escHtml(truncate(item.topic, 32))}
+              ${item.subtopic ? `<div class="tiny faint">${Badger.escHtml(truncate(item.subtopic, 32))}</div>` : ''}</td>
+          <td>${Badger.escHtml(truncate(item.action_text || item.condition_text || item.source_quote, 110))}</td>
+          <td class="tiny faint">${item.matched_policy_id
+            ? `#${Badger.escHtml(item.matched_policy_id)}<div>${Badger.escHtml(truncate(item.matched_action_text || item.matched_condition_text, 70))}</div>`
+            : '—'}</td>`;
+        const box = row.querySelector('[data-pick]');
+        if (box) box.addEventListener('change', () => {
+          if (box.checked) reviewSelection.add(item.extraction_id);
+          else reviewSelection.delete(item.extraction_id);
+          updateReviewButton();
+        });
+        tbody.appendChild(row);
+      }
+      updateReviewButton();
+    }
+
+    function updateReviewButton() {
+      const btn = document.getElementById('review-publish-btn');
+      const n = reviewSelection.size;
+      btn.textContent = n ? `Ingest ${n} Selected` : 'Ingest Selected';
+      btn.disabled = n === 0;
+    }
+
+    async function publishReviewed() {
+      if (!reviewBatchId || !reviewSelection.size) return;
+      const btn = document.getElementById('review-publish-btn');
+      const loading = document.getElementById('review-loading');
+      btn.disabled = true;
+      loading.classList.remove('hidden');
+      try {
+        const data = await Badger.api(
+          '/api/admin/ingest/' + encodeURIComponent(reviewBatchId) + '/publish',
+          { method: 'POST', body: { extraction_ids: [...reviewSelection] } });
+
+        let message = `Ingested ${data.published_count} ${data.published_count === 1 ? 'policy' : 'policies'}.`;
+        if (data.failed && data.failed.length) message += ` ${data.failed.length} could not be published.`;
+        Badger.toast(message, data.failed && data.failed.length ? 'warn' : 'success');
+        resetReview();
+      } catch (e) {
+        Badger.toast(e.message || 'Could not ingest those policies.', 'error');
+      } finally {
+        btn.disabled = false;
+        loading.classList.add('hidden');
+      }
+    }
+
+    async function discardReview() {
+      if (!reviewBatchId) return;
+      try {
+        await Badger.api('/api/admin/ingest/' + encodeURIComponent(reviewBatchId) + '/discard', { method: 'POST' });
+        Badger.toast('Upload discarded. Nothing was added.', 'warn');
+        resetReview();
+      } catch (e) {
+        Badger.toast(e.message || 'Could not discard that upload.', 'error');
+      }
+    }
+
+    function resetReview() {
+      reviewBatchId = null;
+      reviewItems = [];
+      reviewSelection.clear();
+      document.getElementById('review-card').classList.add('hidden');
+      document.getElementById('review-tbody').innerHTML = '';
+      document.getElementById('upload-file').value = '';
+      document.getElementById('upload-title-input').value = '';
+    }
+
+    // ── Policy Library ───────────────────────────────────────
+    // Published policies were previously write-only: this tab lists them and
+    // supports correction, retirement and supersession.
+    let libState = { page: 1, pages: 1, search: '', topic: '', status: '' };
+    let libEditableFields = [];
+    let libPolicyId = null;
+    let supersedeId = null;
+
+    function truncate(text, max) {
+      const clean = String(text || '').replace(/\s+/g, ' ').trim();
+      if (!clean) return '—';
+      return clean.length > max ? clean.slice(0, max - 1) + '…' : clean;
+    }
+
+    function formatWhen(value) {
+      if (!value) return '—';
+      const when = new Date(value);
+      return Number.isNaN(when.getTime()) ? '—' : when.toLocaleString();
+    }
+
+    function statusPill(status) {
+      const value = status || 'active';
+      const cls = value === 'active' ? 'ok' : value === 'archived' ? 'neutral' : 'warn';
+      return `<span class="badge ${cls}">${Badger.escHtml(value)}</span>`;
+    }
+
+    function bindLibrary() {
+      const run = () => { libState.page = 1; loadPolicies(); };
+      let searchTimer = null;
+      document.getElementById('lib-search').addEventListener('input', event => {
+        libState.search = event.target.value.trim();
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(run, 250);
+      });
+      document.getElementById('lib-topic').addEventListener('change', event => {
+        libState.topic = event.target.value; run();
+      });
+      document.getElementById('lib-status').addEventListener('change', event => {
+        libState.status = event.target.value; run();
+      });
+      document.getElementById('lib-refresh').addEventListener('click', () => loadPolicies());
+      document.getElementById('lib-prev').addEventListener('click', () => {
+        if (libState.page > 1) { libState.page -= 1; loadPolicies(); }
+      });
+      document.getElementById('lib-next').addEventListener('click', () => {
+        if (libState.page < libState.pages) { libState.page += 1; loadPolicies(); }
+      });
+
+      document.getElementById('policy-close').addEventListener('click', closePolicyModal);
+      document.getElementById('policy-cancel').addEventListener('click', closePolicyModal);
+      document.getElementById('policy-form').addEventListener('submit', savePolicy);
+      document.getElementById('supersede-close').addEventListener('click', closeSupersedeModal);
+      document.getElementById('supersede-cancel').addEventListener('click', closeSupersedeModal);
+      document.getElementById('supersede-form').addEventListener('submit', submitSupersede);
+
+      loadTopics();
+    }
+
+    async function loadTopics() {
+      try {
+        const data = await Badger.api('/api/admin/policies/topics');
+        libEditableFields = data.editable_fields || [];
+        const select = document.getElementById('lib-topic');
+        for (const topic of (data.topics || [])) {
+          const option = document.createElement('option');
+          option.value = topic;
+          option.textContent = topic;
+          select.appendChild(option);
+        }
+      } catch (e) { /* filters degrade to search only */ }
+    }
+
+    async function loadPolicies() {
+      const tbody = document.getElementById('library-tbody');
+      const params = new URLSearchParams({ page: libState.page, page_size: 25 });
+      if (libState.search) params.set('search', libState.search);
+      if (libState.topic) params.set('topic', libState.topic);
+      if (libState.status) params.set('status', libState.status);
+
+      try {
+        const data = await Badger.api('/api/admin/policies?' + params.toString());
+        const policies = data.policies || [];
+        libState.pages = data.pages || 1;
+
+        document.getElementById('library-count').textContent =
+          data.total ? `(${data.total} ${data.total === 1 ? 'policy' : 'policies'})` : '';
+
+        const pager = document.getElementById('library-pager');
+        pager.hidden = libState.pages <= 1;
+        document.getElementById('lib-page-label').textContent = `Page ${data.page} of ${libState.pages}`;
+        document.getElementById('lib-prev').disabled = data.page <= 1;
+        document.getElementById('lib-next').disabled = data.page >= libState.pages;
+
+        if (!policies.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">No policies match these filters.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = '';
+        const isSuper = currentUser?.role === 'super_admin';
+        for (const policy of policies) {
+          const status = policy.status || 'active';
+          const row = document.createElement('tr');
+          row.innerHTML = `
+            <td class="strong">${Badger.escHtml(truncate(policy.topic, 40))}
+              ${policy.subtopic ? `<div class="tiny faint">${Badger.escHtml(truncate(policy.subtopic, 40))}</div>` : ''}</td>
+            <td>${Badger.escHtml(truncate(policy.action_text || policy.condition_text || policy.source_quote, 90))}</td>
+            <td>${statusPill(status)}</td>
+            <td class="tiny faint">${Badger.escHtml(formatWhen(policy.updated_at))}</td>
+            <td><div class="row wrap">
+              <button type="button" class="btn btn-sm btn-ghost" data-action="edit">Edit</button>
+              ${isSuper && status !== 'archived' ? '<button type="button" class="btn btn-sm btn-ghost" data-action="supersede">Supersede</button>' : ''}
+              ${isSuper && status === 'archived'
+                ? '<button type="button" class="btn btn-sm btn-ghost" data-action="restore">Restore</button>'
+                : isSuper ? '<button type="button" class="btn btn-sm btn-danger" data-action="archive">Archive</button>' : ''}
+            </div></td>`;
+          row.querySelector('[data-action="edit"]').addEventListener('click', () => editPolicy(policy.policy_id));
+          row.querySelector('[data-action="archive"]')?.addEventListener('click', () => archivePolicy(policy.policy_id));
+          row.querySelector('[data-action="restore"]')?.addEventListener('click', () => restorePolicy(policy.policy_id));
+          row.querySelector('[data-action="supersede"]')?.addEventListener('click', () => openSupersede(policy.policy_id));
+          tbody.appendChild(row);
+        }
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty">${Badger.escHtml(e.message || 'Unable to load policies.')}</td></tr>`;
+      }
+    }
+
+    async function editPolicy(policyId) {
+      try {
+        const data = await Badger.api('/api/admin/policies/' + encodeURIComponent(policyId));
+        const policy = data.policy || {};
+        libPolicyId = policyId;
+        const host = document.getElementById('policy-fields');
+        host.innerHTML = libEditableFields.map(field => {
+          const value = policy[field] == null ? '' : String(policy[field]);
+          const long = value.length > 60 || ['condition_text', 'action_text', 'source_quote', 'exception_text', 'recommendation_text'].includes(field);
+          const label = field.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+          const control = long
+            ? `<textarea class="textarea" rows="3" data-field="${Badger.escHtml(field)}">${Badger.escHtml(value)}</textarea>`
+            : `<input type="text" class="input" data-field="${Badger.escHtml(field)}" value="${Badger.escHtml(value)}">`;
+          return `<div class="field"><label class="field-label">${Badger.escHtml(label)}</label>${control}</div>`;
+        }).join('') || '<p class="muted">No editable fields are available on this table.</p>';
+        Badger.openModal('policy-modal');
+        document.getElementById('app').inert = true;
+      } catch (e) {
+        Badger.toast(e.message || 'Could not open that policy.', 'error');
+      }
+    }
+
+    function closePolicyModal() {
+      Badger.closeModal('policy-modal');
+      document.getElementById('app').inert = false;
+      libPolicyId = null;
+    }
+
+    async function savePolicy(event) {
+      event.preventDefault();
+      if (!libPolicyId) return;
+      const button = document.getElementById('policy-save');
+      const updates = {};
+      document.querySelectorAll('#policy-fields [data-field]').forEach(node => {
+        updates[node.dataset.field] = node.value;
+      });
+      button.disabled = true;
+      try {
+        await Badger.api('/api/admin/policies/' + encodeURIComponent(libPolicyId), { method: 'PATCH', body: { updates } });
+        Badger.toast('Policy updated.', 'success');
+        closePolicyModal();
+        await loadPolicies();
+      } catch (e) {
+        Badger.toast(e.message || 'Could not save the policy.', 'error');
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function archivePolicy(policyId) {
+      try {
+        await Badger.api('/api/admin/policies/' + encodeURIComponent(policyId) + '/archive', { method: 'POST', body: { reason: '' } });
+        Badger.toast('Policy archived. It will no longer appear in answers.', 'warn');
+        await loadPolicies();
+      } catch (e) {
+        Badger.toast(e.message || 'Could not archive that policy.', 'error');
+      }
+    }
+
+    async function restorePolicy(policyId) {
+      try {
+        await Badger.api('/api/admin/policies/' + encodeURIComponent(policyId) + '/restore', { method: 'POST' });
+        Badger.toast('Policy restored.', 'success');
+        await loadPolicies();
+      } catch (e) {
+        Badger.toast(e.message || 'Could not restore that policy.', 'error');
+      }
+    }
+
+    function openSupersede(policyId) {
+      supersedeId = policyId;
+      document.getElementById('supersede-target').value = '';
+      Badger.openModal('supersede-modal');
+      document.getElementById('app').inert = true;
+      document.getElementById('supersede-target').focus();
+    }
+
+    function closeSupersedeModal() {
+      Badger.closeModal('supersede-modal');
+      document.getElementById('app').inert = false;
+      supersedeId = null;
+    }
+
+    async function submitSupersede(event) {
+      event.preventDefault();
+      const replacement = document.getElementById('supersede-target').value.trim();
+      if (!supersedeId || !replacement) return;
+      try {
+        await Badger.api('/api/admin/policies/' + encodeURIComponent(supersedeId) + '/supersede',
+          { method: 'POST', body: { replacement_policy_id: replacement } });
+        Badger.toast('Policy superseded.', 'success');
+        closeSupersedeModal();
+        await loadPolicies();
+      } catch (e) {
+        Badger.toast(e.message || 'Could not supersede that policy.', 'error');
+      }
+    }
+
+    // ── Audit Log ────────────────────────────────────────────
+    let auditState = { page: 1, pages: 1, source: '', action: '', actor: '' };
+
+    function bindAudit() {
+      const run = () => { auditState.page = 1; loadAudit(); };
+      document.getElementById('audit-source').addEventListener('change', e => { auditState.source = e.target.value; run(); });
+      document.getElementById('audit-action').addEventListener('change', e => { auditState.action = e.target.value; run(); });
+      let actorTimer = null;
+      document.getElementById('audit-actor').addEventListener('input', e => {
+        auditState.actor = e.target.value.trim();
+        clearTimeout(actorTimer);
+        actorTimer = setTimeout(run, 250);
+      });
+      document.getElementById('audit-refresh').addEventListener('click', () => loadAudit());
+      document.getElementById('audit-prev').addEventListener('click', () => {
+        if (auditState.page > 1) { auditState.page -= 1; loadAudit(); }
+      });
+      document.getElementById('audit-next').addEventListener('click', () => {
+        if (auditState.page < auditState.pages) { auditState.page += 1; loadAudit(); }
+      });
+      loadAuditActions();
+    }
+
+    async function loadAuditActions() {
+      try {
+        const data = await Badger.api('/api/admin/audit/actions');
+        const select = document.getElementById('audit-action');
+        for (const action of (data.actions || [])) {
+          const option = document.createElement('option');
+          option.value = action;
+          option.textContent = action.replace(/_/g, ' ');
+          select.appendChild(option);
+        }
+      } catch (e) { /* filter degrades to all actions */ }
+    }
+
+    async function loadAudit() {
+      const tbody = document.getElementById('audit-tbody');
+      const params = new URLSearchParams({ page: auditState.page, page_size: 50 });
+      if (auditState.source) params.set('source', auditState.source);
+      if (auditState.action) params.set('action', auditState.action);
+      if (auditState.actor) params.set('actor', auditState.actor);
+
+      try {
+        const data = await Badger.api('/api/admin/audit?' + params.toString());
+        const events = data.events || [];
+        auditState.pages = data.pages || 1;
+
+        document.getElementById('audit-count').textContent =
+          data.total ? `(${data.total} ${data.total === 1 ? 'event' : 'events'})` : '';
+
+        const pager = document.getElementById('audit-pager');
+        pager.hidden = auditState.pages <= 1;
+        document.getElementById('audit-page-label').textContent = `Page ${data.page} of ${auditState.pages}`;
+        document.getElementById('audit-prev').disabled = data.page <= 1;
+        document.getElementById('audit-next').disabled = data.page >= auditState.pages;
+
+        if (!events.length) {
+          tbody.innerHTML = '<tr><td colspan="5" class="empty">No audit events match these filters.</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = events.map(event => {
+          let details = '—';
+          if (event.details && Object.keys(event.details).length) {
+            details = JSON.stringify(event.details);
+          }
+          return `<tr>
+            <td class="tiny faint">${Badger.escHtml(formatWhen(event.created_at))}</td>
+            <td>${Badger.escHtml(event.actor || '—')}</td>
+            <td><span class="badge neutral">${Badger.escHtml(String(event.action || '').replace(/_/g, ' '))}</span></td>
+            <td>${Badger.escHtml(truncate(event.subject, 40))}</td>
+            <td class="tiny">${Badger.escHtml(truncate(details, 120))}</td>
+          </tr>`;
+        }).join('');
+      } catch (e) {
+        tbody.innerHTML = `<tr><td colspan="5" class="empty">${Badger.escHtml(e.message || 'Unable to load audit events.')}</td></tr>`;
+      }
+    }
+
     // ── User Management ──────────────────────────────────────
     let currentUser = null;
 
     async function initUserManagement() {
       currentUser = await Badger.me();
       const isAdmin = currentUser && ['super_admin', 'manager_admin'].includes(currentUser.role);
-      const active = location.hash === '#users' ? 'users' : 'studio';
+      const requested = location.hash.slice(1);
+      const active = TAB_NAMES.includes(requested) ? requested : 'studio';
       document.getElementById('app').insertAdjacentHTML('afterbegin',
         Badger.renderRail({ active, user: currentUser, folders: [], threads: [] }));
       Badger.bindRail();
@@ -543,7 +1171,12 @@
       if (currentUser.role === 'super_admin') {
         document.getElementById('new-user-role').innerHTML +=
           '<option value="manager_admin">Manager Admin</option>';
+        // Archive/restore/supersede and the audit trail are super-admin only.
+        document.getElementById('tab-audit-btn').classList.remove('hidden');
       }
+      bindUpload();
+      bindLibrary();
+      bindAudit();
       switchTab(active, false);
       await loadUsers();
     }
@@ -590,6 +1223,7 @@
 
           const actions = canManage ? `
             <div class="row wrap">
+              <button type="button" class="btn btn-sm btn-ghost" data-action="edit">Edit</button>
               <button type="button" class="btn btn-sm btn-ghost" data-action="reset">Reset Password</button>
               ${u.is_active
                 ? '<button type="button" class="btn btn-sm btn-danger" data-action="deactivate">Deactivate</button>'
@@ -613,6 +1247,7 @@
             <td>${statusHtml}</td>
             <td>${actions}</td>
           `;
+          row.querySelector('[data-action="edit"]')?.addEventListener('click', () => editUser(u));
           row.querySelector('[data-action="reset"]')?.addEventListener('click', () => resetPassword(u.id));
           row.querySelector('[data-action="deactivate"]')?.addEventListener('click', () => deactivateUser(u.id));
           row.querySelector('[data-action="reactivate"]')?.addEventListener('click', () => reactivateUser(u.id));
@@ -657,6 +1292,47 @@
         Badger.toast(e.message, 'error');
       } finally {
         btn.disabled = false;
+      }
+    }
+
+    // Role and email were previously only changeable in SQL.
+    let editUserId = null;
+
+    function editUser(user) {
+      editUserId = user.id;
+      document.getElementById('edit-user-email').value = user.email || '';
+      const roleField = document.getElementById('edit-user-role-field');
+      const canChangeRole = currentUser?.role === 'super_admin';
+      roleField.hidden = !canChangeRole;
+      if (canChangeRole) document.getElementById('edit-user-role').value = user.role;
+      document.getElementById('edit-user-title').textContent = 'Edit ' + user.username;
+      Badger.openModal('edit-user-modal');
+      document.getElementById('app').inert = true;
+      document.getElementById('edit-user-email').focus();
+    }
+
+    function closeEditUserModal() {
+      Badger.closeModal('edit-user-modal');
+      document.getElementById('app').inert = false;
+      editUserId = null;
+    }
+
+    async function submitEditUser(event) {
+      event.preventDefault();
+      if (!editUserId) return;
+      const button = document.getElementById('edit-user-submit');
+      const body = { email: document.getElementById('edit-user-email').value.trim() };
+      if (currentUser?.role === 'super_admin') body.role = document.getElementById('edit-user-role').value;
+      button.disabled = true;
+      try {
+        await Badger.api('/api/admin/users/' + encodeURIComponent(editUserId), { method: 'PATCH', body });
+        Badger.toast('User updated.', 'success');
+        closeEditUserModal();
+        await loadUsers();
+      } catch (e) {
+        Badger.toast(e.message || 'Could not update that user.', 'error');
+      } finally {
+        button.disabled = false;
       }
     }
 

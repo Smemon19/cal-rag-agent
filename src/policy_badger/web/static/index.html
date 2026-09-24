@@ -75,13 +75,20 @@
       const home = B.el('home');
       const toggle = B.el('rail-toggle');
       const mic = B.el('mic');
-      const folders = [
-        { label: 'Time & Attendance', spine: 'var(--mint)' },
-        { label: 'Expenses & Travel', spine: 'var(--amber)' },
-        { label: 'HR & Conduct', spine: 'var(--rose)' }
-      ];
+      const SPINES = ['var(--mint)', 'var(--amber)', 'var(--rose)', 'var(--lime)', 'var(--sky)'];
       const headers = new Set(['Direct Answer', 'Key Details', 'Important Notes / Exceptions', 'What You Should Do']);
+      // Folders are the real policy topics in the database, not fixed labels.
+      let folders = [];
+      try {
+        const topicData = await B.api('/api/topics');
+        folders = (topicData.topics || []).slice(0, 6).map((label, i) => ({
+          label, spine: SPINES[i % SPINES.length], question: 'What is the policy on ' + label + '?'
+        }));
+      } catch (e) { folders = []; }
+
+      // Threads mirror server-side conversations; `id` is a conversation UUID.
       let threads = [];
+      let currentConversationId = null;
       let sequence = 0;
       let pending = null;
       let recognition = null;
@@ -171,30 +178,102 @@
         });
       });
 
+      // ── Conversation history ────────────────────────────────────────────
+      function groupFor(iso) {
+        const when = new Date(iso);
+        if (Number.isNaN(when.getTime())) return 'Earlier';
+        const startOfToday = new Date();
+        startOfToday.setHours(0, 0, 0, 0);
+        const days = Math.floor((startOfToday - when) / 86400000);
+        if (days <= 0) return 'Today';
+        if (days === 1) return 'Yesterday';
+        if (days < 7) return 'This week';
+        return 'Earlier';
+      }
+
+      async function refreshConversations() {
+        try {
+          const data = await B.api('/api/conversations');
+          threads = (data.conversations || []).map(c => ({
+            id: c.id,
+            label: c.title,
+            group: groupFor(c.updated_at),
+            active: c.id === currentConversationId
+          }));
+          updateThreads();
+        } catch (e) { /* the rail simply stays as it is */ }
+      }
+
+      async function openConversation(conversationId) {
+        if (pending) pending.abort();
+        pending = null;
+        let data;
+        try {
+          data = await B.api('/api/conversations/' + encodeURIComponent(conversationId));
+        } catch (e) {
+          B.toast(e.message || 'Could not open that conversation.', 'error');
+          return;
+        }
+        currentConversationId = conversationId;
+        messages.replaceChildren();
+        home.classList.add('hidden');
+        chat.classList.remove('hidden');
+        for (const message of (data.messages || [])) {
+          if (message.role === 'user') appendUser(message.content);
+          else appendBot(message.content, message.rows_found, lastQuestion(data.messages, message));
+        }
+        updateThreads();
+        scrollDown();
+      }
+
+      // The question a given answer replied to, so Regenerate still works on
+      // a transcript loaded from the server.
+      function lastQuestion(all, answer) {
+        const index = all.indexOf(answer);
+        for (let i = index - 1; i >= 0; i -= 1) {
+          if (all[i].role === 'user') return all[i].content;
+        }
+        return '';
+      }
+
       // Refresh only the list, so mobile and collapse handlers are bound once.
       function updateThreads() {
         const template = document.createElement('template');
         template.innerHTML = B.renderRail({ ...railOptions, threads });
         const list = template.content.querySelector('#rail-threads');
-        list.querySelectorAll('.row-more').forEach(node => node.remove());
+        list.querySelectorAll('.row-more').forEach(node => {
+          node.setAttribute('aria-label', 'Delete conversation');
+          node.title = 'Delete conversation';
+        });
         B.el('rail-threads').replaceChildren(...list.childNodes);
       }
-      B.el('rail-threads').addEventListener('click', event => {
+      B.el('rail-threads').addEventListener('click', async event => {
         const button = event.target.closest('[data-thread]');
         if (!button) return;
-        closeRail();
-        const row = B.el(button.dataset.thread);
-        if (row) {
-          home.classList.add('hidden');
-          chat.classList.remove('hidden');
-          row.focus({ preventScroll: true });
-          row.scrollIntoView({ block: 'start' });
+        const conversationId = button.dataset.thread;
+
+        if (event.target.closest('.row-more')) {
+          event.stopPropagation();
+          try {
+            await B.api('/api/conversations/' + encodeURIComponent(conversationId), { method: 'DELETE' });
+            if (conversationId === currentConversationId) resetChat();
+            await refreshConversations();
+            B.toast('Conversation deleted.');
+          } catch (e) {
+            B.toast(e.message || 'Could not delete that conversation.', 'error');
+          }
+          return;
         }
+
+        closeRail();
+        openConversation(conversationId);
       });
       rail.querySelectorAll('.rail-folder').forEach((folder, index) => {
         folder.addEventListener('click', event => {
           event.preventDefault();
-          input.value = ['What is the policy on time and attendance?', 'What is the policy on expenses and travel?', 'What is the policy on workplace conduct?'][index];
+          const entry = folders[index];
+          if (!entry) return;
+          input.value = entry.question;
           input.dispatchEvent(new Event('input'));
           closeRail(); input.focus();
         });
@@ -221,7 +300,7 @@
         if (recognition && listening) recognition.abort();
         if (canSpeak) window.speechSynthesis.cancel();
         messages.replaceChildren();
-        threads = [];
+        currentConversationId = null;
         updateThreads();
         home.classList.remove('hidden');
         chat.classList.add('hidden');
@@ -251,6 +330,17 @@
       }
       function actionButton(action, label, icon) {
         return '<button type="button" class="msg-action" data-action="' + action + '" aria-label="' + label + '" title="' + label + '">' + icon(15) + '</button>';
+      }
+      function appendUser(question) {
+        const row = document.createElement('article');
+        row.className = 'msg from-user';
+        row.id = 'question-' + (++sequence);
+        row.tabIndex = -1;
+        row.setAttribute('aria-label', 'Your question');
+        row.innerHTML = '<div class="msg-avatar user" aria-hidden="true">' + B.escHtml(initials) + '</div>' +
+          '<div class="msg-col"><div class="bubble">' + B.escHtml(question).replace(/\n/g, '<br>') + '</div></div>';
+        messages.appendChild(row);
+        scrollDown();
       }
       function appendBot(answer, rowsFound, question, isError = false) {
         const row = document.createElement('article');
@@ -293,19 +383,9 @@
         if (recognition && listening) recognition.abort();
         const request = new AbortController();
         pending = request;
-        const id = 'question-' + (++sequence);
         home.classList.add('hidden');
         chat.classList.remove('hidden');
-        const row = document.createElement('article');
-        row.className = 'msg from-user';
-        row.id = id;
-        row.tabIndex = -1;
-        row.setAttribute('aria-label', 'Your question');
-        row.innerHTML = '<div class="msg-avatar user" aria-hidden="true">' + B.escHtml(initials) + '</div>' +
-          '<div class="msg-col"><div class="bubble">' + B.escHtml(question).replace(/\n/g, '<br>') + '</div></div>';
-        messages.appendChild(row);
-        threads.unshift({ id, label: question.slice(0, 42), group: 'Today' });
-        updateThreads();
+        appendUser(question);
         input.value = '';
         input.dispatchEvent(new Event('input'));
         input.focus();
@@ -319,7 +399,7 @@
           const response = await fetch('/ask', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ question }),
+            body: JSON.stringify({ question, conversation_id: currentConversationId }),
             signal: request.signal
           });
           const data = await response.json();
@@ -331,6 +411,9 @@
             throw new Error('Invalid answer response');
           } else {
             appendBot(data.answer, data.rows_found, question);
+            if (data.conversation_id) currentConversationId = data.conversation_id;
+            // Pick up the server-derived title and ordering.
+            refreshConversations();
           }
         } catch (error) {
           if (pending !== request || error.name === 'AbortError') return;
@@ -380,6 +463,24 @@
           catch { B.toast('Dictation could not start. Please try again.', 'error'); }
         });
       }
+      // Replace the built-in starters with the user's saved questions.
+      try {
+        const settingsData = await B.api('/api/settings');
+        const saved = (settingsData.settings && settingsData.settings.prompts) || [];
+        const buttons = [...document.querySelectorAll('.starter')];
+        buttons.forEach((button, i) => {
+          if (saved[i]) {
+            button.dataset.question = saved[i];
+            button.querySelector('.starter-title').textContent = saved[i];
+            const desc = button.querySelector('.starter-desc');
+            if (desc) desc.remove();
+          } else if (i >= saved.length && saved.length) {
+            button.remove();
+          }
+        });
+      } catch (e) { /* the default starters stay */ }
+
+      await refreshConversations();
       updateSend();
     });
   </script>

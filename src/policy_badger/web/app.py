@@ -14,7 +14,7 @@ from typing import Optional
 
 import bcrypt
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Form, Request, HTTPException
+from fastapi import Depends, FastAPI, File, Form, Request, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -33,12 +33,16 @@ from policy_badger.ingestion.admin_input_pipeline import (
 )
 
 from policy_badger.engine.auth_db import (
+    revalidate_session_user,
     authenticate_user, update_last_login, create_user,
     get_user_by_username, get_current_session_user, require_roles,
     require_login, list_users_for_admin,
     create_managed_user, reset_managed_user_password,
-    deactivate_managed_user, reactivate_managed_user, verify_user_password
+    deactivate_managed_user, reactivate_managed_user, verify_user_password,
+    update_managed_user
 )
+from policy_badger.engine import audit_read, conversations_db, policy_admin_db, settings_db
+from policy_badger.ingestion import document_upload
 from policy_badger.engine.db import run_query, execute
 
 # ── Production safety guard ──────────────────────────────────────────────────
@@ -132,6 +136,25 @@ def _seed_super_admin():
         logging.error(f"Failed to seed super admin: {str(e)}")
 
 # ── Auth dependency ───────────────────────────────────────────────────────────
+def session_is_still_valid(request: Request) -> bool:
+    """
+    Re-check a page session against the database.
+
+    The HTML routes read request.session directly rather than going through
+    require_login, so without this a deactivated user keeps browsing until the
+    cookie expires. Returns False once the account is gone or disabled, having
+    already cleared the session.
+    """
+    user = get_current_session_user(request)
+    if not user:
+        return False
+    try:
+        revalidate_session_user(request, user)
+        return True
+    except HTTPException:
+        return False
+
+
 def require_auth(request: Request):
     if not request.session.get("user"):
         raise _redirect_to_login()
@@ -211,10 +234,13 @@ async def index(request: Request):
         return RedirectResponse("/login", status_code=302)
     if request.session.get("must_reset_password"):
         return RedirectResponse("/change-password", status_code=302)
+    if not session_is_still_valid(request):
+        return RedirectResponse("/login", status_code=302)
     return HTMLResponse((PUBLIC_DIR / "index.html").read_text(encoding="utf-8"))
 
 class AskRequest(BaseModel):
     question: str
+    conversation_id: Optional[str] = None
 
 @app.post("/ask")
 async def ask(req: AskRequest, request: Request):
@@ -222,19 +248,50 @@ async def ask(req: AskRequest, request: Request):
         return JSONResponse({"error": "Not authenticated."}, status_code=401)
     if request.session.get("must_reset_password"):
         return JSONResponse({"error": "Password reset required."}, status_code=403)
+    if not session_is_still_valid(request):
+        return JSONResponse({"error": "Your session is no longer valid. Please sign in again."}, status_code=401)
 
     question = (req.question or "").strip()
     if not question:
         return JSONResponse({"error": "Question is empty."}, status_code=400)
 
+    user_id = request.session.get("user_id")
+
+    # Answer preferences are read server-side from the signed-in user rather
+    # than trusted from the request body.
     try:
-        result = answer_policy_question(question)
-        return {
-            "answer": result.get("answer", ""),
-            "rows_found": result.get("row_count", 0),
-        }
+        user_settings = settings_db.get_user_settings(user_id) if user_id else {}
+    except Exception:
+        user_settings = {}
+
+    try:
+        result = answer_policy_question(question, settings=user_settings)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+    answer = result.get("answer", "")
+    rows_found = result.get("row_count", 0)
+
+    # History is best-effort: a persistence failure must not lose the answer
+    # the user just waited for.
+    conversation_id = req.conversation_id
+    if user_id:
+        try:
+            conversation_id = conversations_db.append_exchange(
+                user_id=user_id,
+                conversation_id=req.conversation_id,
+                question=question,
+                answer=answer,
+                rows_found=rows_found,
+            )
+        except Exception as e:
+            logging.warning("Could not persist conversation: %s", e)
+
+    return {
+        "answer": answer,
+        "rows_found": rows_found,
+        "conversation_id": conversation_id,
+    }
 
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
@@ -242,6 +299,8 @@ async def settings_page(request: Request):
         return RedirectResponse("/login", status_code=302)
     if request.session.get("must_reset_password"):
         return RedirectResponse("/change-password", status_code=302)
+    if not session_is_still_valid(request):
+        return RedirectResponse("/login", status_code=302)
     return HTMLResponse((PUBLIC_DIR / "settings.html").read_text(encoding="utf-8"))
 
 @app.get("/health")
@@ -256,6 +315,10 @@ async def admin_page(request: Request):
     if request.session.get("must_reset_password"):
         return RedirectResponse("/change-password", status_code=302)
 
+    if not session_is_still_valid(request):
+        return RedirectResponse("/login", status_code=302)
+
+    # Read the role after revalidation so a demotion is honoured immediately.
     role = request.session.get("role")
     if role == "employee":
         return HTMLResponse(
@@ -525,5 +588,275 @@ async def api_admin_reactivate_user(user_id: str, request: Request):
         return {"message": "User reactivated successfully"}
     except HTTPException as he:
         raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+class UpdateUserReq(BaseModel):
+    role: Optional[str] = None
+    email: Optional[str] = None
+
+class SettingsReq(BaseModel):
+    settings: dict
+
+class RenameConversationReq(BaseModel):
+    title: str
+
+class UpdatePolicyReq(BaseModel):
+    updates: dict
+
+class ArchivePolicyReq(BaseModel):
+    reason: Optional[str] = None
+
+class SupersedePolicyReq(BaseModel):
+    replacement_policy_id: str
+
+@app.patch("/api/admin/users/{user_id}")
+async def api_admin_update_user(user_id: str, req: UpdateUserReq, request: Request):
+    user = require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return update_managed_user(user, user_id, role=req.role, email=req.email)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ── Answer Settings ───────────────────────────────────────────────────────────
+@app.get("/api/settings")
+async def api_get_settings(request: Request):
+    user = require_login(request)
+    try:
+        return {"settings": settings_db.get_user_settings(user["user_id"])}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.put("/api/settings")
+async def api_save_settings(req: SettingsReq, request: Request):
+    user = require_login(request)
+    try:
+        saved = settings_db.save_user_settings(user["user_id"], req.settings)
+        return {"settings": saved}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ── Conversation History ──────────────────────────────────────────────────────
+@app.get("/api/conversations")
+async def api_list_conversations(request: Request):
+    user = require_login(request)
+    try:
+        return {"conversations": conversations_db.list_conversations(user["user_id"])}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/conversations/{conversation_id}")
+async def api_get_conversation(conversation_id: str, request: Request):
+    user = require_login(request)
+    try:
+        return conversations_db.get_conversation(user["user_id"], conversation_id)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.patch("/api/conversations/{conversation_id}")
+async def api_rename_conversation(conversation_id: str, req: RenameConversationReq, request: Request):
+    user = require_login(request)
+    try:
+        conversations_db.rename_conversation(user["user_id"], conversation_id, req.title)
+        return {"message": "Conversation renamed."}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.delete("/api/conversations/{conversation_id}")
+async def api_delete_conversation(conversation_id: str, request: Request):
+    user = require_login(request)
+    try:
+        conversations_db.delete_conversation(user["user_id"], conversation_id)
+        return {"message": "Conversation deleted."}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ── Browse ────────────────────────────────────────────────────────────────────
+@app.get("/api/topics")
+async def api_topics(request: Request):
+    """Policy topics for the sidebar folders. Available to any signed-in user."""
+    require_login(request)
+    try:
+        return {"topics": policy_admin_db.list_topics()}
+    except Exception:
+        # The rail degrades to no folders rather than failing the page.
+        return {"topics": []}
+
+# ── Policy Library ────────────────────────────────────────────────────────────
+@app.get("/api/admin/policies")
+async def api_list_policies(
+    request: Request,
+    search: Optional[str] = None,
+    status: Optional[str] = None,
+    topic: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 25,
+):
+    require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return policy_admin_db.list_policies(
+            search=search, status=status, topic=topic, page=page, page_size=page_size
+        )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/admin/policies/topics")
+async def api_list_policy_topics(request: Request):
+    require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return {"topics": policy_admin_db.list_topics(), "editable_fields": policy_admin_db.editable_fields()}
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/admin/policies/{policy_id}")
+async def api_get_policy(policy_id: str, request: Request):
+    require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return {"policy": policy_admin_db.get_policy(policy_id)}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.patch("/api/admin/policies/{policy_id}")
+async def api_update_policy(policy_id: str, req: UpdatePolicyReq, request: Request):
+    user = require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return {"policy": policy_admin_db.update_policy(user["user_id"], policy_id, req.updates)}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/admin/policies/{policy_id}/archive")
+async def api_archive_policy(policy_id: str, req: ArchivePolicyReq, request: Request):
+    # Retiring a policy changes what every employee is told, so it is
+    # super-admin only.
+    user = require_roles(request, {"super_admin"})
+    try:
+        policy_admin_db.archive_policy(user["user_id"], policy_id, req.reason or "")
+        return {"message": "Policy archived."}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/admin/policies/{policy_id}/restore")
+async def api_restore_policy(policy_id: str, request: Request):
+    user = require_roles(request, {"super_admin"})
+    try:
+        policy_admin_db.restore_policy(user["user_id"], policy_id)
+        return {"message": "Policy restored."}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/admin/policies/{policy_id}/supersede")
+async def api_supersede_policy(policy_id: str, req: SupersedePolicyReq, request: Request):
+    user = require_roles(request, {"super_admin"})
+    try:
+        policy_admin_db.supersede_policy(user["user_id"], policy_id, req.replacement_policy_id)
+        return {"message": "Policy superseded."}
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ── Document Upload & Review ──────────────────────────────────────────────────
+class PublishSelectedReq(BaseModel):
+    extraction_ids: list[str]
+
+@app.post("/api/admin/ingest/upload")
+async def api_ingest_upload(
+    request: Request,
+    file: UploadFile = File(...),
+    title: Optional[str] = Form(None),
+):
+    """Extract policies from an uploaded document and return them for review."""
+    user = require_roles(request, {"manager_admin", "super_admin"})
+    content = await file.read()
+    try:
+        return document_upload.ingest_upload(
+            filename=file.filename or "upload",
+            content=content,
+            title=title,
+            triggered_by=user["username"],
+        )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/admin/ingest/{batch_id}/review")
+async def api_ingest_review(batch_id: str, request: Request):
+    require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return document_upload.get_review(batch_id)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/admin/ingest/{batch_id}/publish")
+async def api_ingest_publish(batch_id: str, req: PublishSelectedReq, request: Request):
+    user = require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return document_upload.publish_selected(
+            batch_id=batch_id,
+            extraction_ids=req.extraction_ids,
+            published_by=user["user_id"],
+        )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/admin/ingest/{batch_id}/discard")
+async def api_ingest_discard(batch_id: str, request: Request):
+    require_roles(request, {"manager_admin", "super_admin"})
+    try:
+        return document_upload.discard_batch(batch_id)
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# ── Audit Trail ───────────────────────────────────────────────────────────────
+@app.get("/api/admin/audit")
+async def api_list_audit(
+    request: Request,
+    source: Optional[str] = None,
+    action: Optional[str] = None,
+    actor: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 50,
+):
+    # The audit trail names who did what to whom; super admins only.
+    require_roles(request, {"super_admin"})
+    if source and source not in audit_read.VALID_SOURCES:
+        return JSONResponse({"error": "Unknown audit source."}, status_code=400)
+    try:
+        return audit_read.list_audit_events(
+            source=source, action=action, actor=actor, page=page, page_size=page_size
+        )
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/admin/audit/actions")
+async def api_list_audit_actions(request: Request):
+    require_roles(request, {"super_admin"})
+    try:
+        return {"actions": audit_read.list_audit_actions()}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

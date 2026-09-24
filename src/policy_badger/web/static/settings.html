@@ -282,7 +282,6 @@
 (function () {
   "use strict";
 
-  var STORE_KEY = "badger.settings.v1";
 
   var DEFAULTS = {
     prompts: [
@@ -306,19 +305,21 @@
     "Name the approver", "Include deadlines", "Show dollar limits", "Compare options"
   ];
 
-  var state = load();
+  var state = JSON.parse(JSON.stringify(DEFAULTS));
   var dirty = false;
 
-  function load() {
+  // Settings live on the server so they follow the user between devices and so
+  // /ask can apply them when formatting an answer.
+  async function load() {
     try {
-      var raw = localStorage.getItem(STORE_KEY);
-      if (!raw) return JSON.parse(JSON.stringify(DEFAULTS));
-      var parsed = JSON.parse(raw);
+      var data = await Badger.api("/api/settings");
+      var parsed = (data && data.settings) || {};
       // Merge so a newly added default never comes back undefined.
       return Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), parsed, {
         toggles: Object.assign({}, DEFAULTS.toggles, parsed.toggles || {})
       });
     } catch (e) {
+      Badger.toast("Could not load your settings; showing defaults.", "warn");
       return JSON.parse(JSON.stringify(DEFAULTS));
     }
   }
@@ -401,8 +402,6 @@
   function bindToggles() {
     document.querySelectorAll("[data-toggle]").forEach(function (t) {
       var key = t.getAttribute("data-toggle");
-      t.classList.toggle("on", !!state.toggles[key]);
-      t.setAttribute("aria-pressed", String(!!state.toggles[key]));
       t.addEventListener("click", function () {
         state.toggles[key] = !state.toggles[key];
         t.classList.toggle("on", state.toggles[key]);
@@ -416,11 +415,29 @@
   var LENGTHS = ["Short", "Medium", "Thorough"];
 
   function bindSelect(id, key) {
-    var node = Badger.el(id);
-    node.value = state[key];
-    node.addEventListener("change", function () {
-      state[key] = node.value;
+    Badger.el(id).addEventListener("change", function () {
+      state[key] = Badger.el(id).value;
       markDirty();
+    });
+  }
+
+  // Push current state into the controls. Kept separate from binding so it can
+  // run again after the server returns the sanitized settings.
+  function syncControls() {
+    Badger.el("s-preset").value = state.preset;
+    Badger.el("s-format").value = state.format;
+    Badger.el("s-reading").value = state.reading;
+
+    Badger.el("s-length").value = state.length;
+    Badger.el("v-length").textContent = LENGTHS[state.length];
+
+    Badger.el("s-precision").value = state.precision;
+    Badger.el("v-precision").textContent = (state.precision / 10).toFixed(1);
+
+    document.querySelectorAll("[data-toggle]").forEach(function (t) {
+      var key = t.getAttribute("data-toggle");
+      t.classList.toggle("on", !!state.toggles[key]);
+      t.setAttribute("aria-pressed", String(!!state.toggles[key]));
     });
   }
 
@@ -430,8 +447,6 @@
     bindSelect("s-reading", "reading");
 
     var lenEl = Badger.el("s-length");
-    lenEl.value = state.length;
-    Badger.el("v-length").textContent = LENGTHS[state.length];
     lenEl.addEventListener("input", function () {
       state.length = parseInt(lenEl.value, 10);
       Badger.el("v-length").textContent = LENGTHS[state.length];
@@ -439,8 +454,6 @@
     });
 
     var precEl = Badger.el("s-precision");
-    precEl.value = state.precision;
-    Badger.el("v-precision").textContent = (state.precision / 10).toFixed(1);
     precEl.addEventListener("input", function () {
       state.precision = parseInt(precEl.value, 10);
       Badger.el("v-precision").textContent = (state.precision / 10).toFixed(1);
@@ -449,13 +462,24 @@
 
     Badger.el("add-prompt").addEventListener("click", onAddPrompt);
 
-    Badger.el("save-btn").addEventListener("click", function () {
+    Badger.el("save-btn").addEventListener("click", async function () {
+      var btn = Badger.el("save-btn");
+      btn.disabled = true;
       try {
-        localStorage.setItem(STORE_KEY, JSON.stringify(state));
+        var data = await Badger.api("/api/settings", { method: "PUT", body: { settings: state } });
+        // Re-render from what the server actually stored, so any value it
+        // rejected is visible immediately rather than only after a reload.
+        if (data && data.settings) {
+          state = data.settings;
+          renderPrompts();
+          renderStyles();
+          syncControls();
+        }
         markClean();
         Badger.toast("Settings saved.");
       } catch (e) {
-        Badger.toast("Could not save settings on this device.", "error");
+        btn.disabled = false;
+        Badger.toast(e.message || "Could not save settings.", "error");
       }
     });
   }
@@ -511,6 +535,9 @@
 
     bindToggles();
     bindControls();
+
+    state = await load();
+    syncControls();
     renderPrompts();
     renderStyles();
     markClean();

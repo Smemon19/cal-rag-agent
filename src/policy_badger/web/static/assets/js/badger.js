@@ -156,6 +156,10 @@
     if (isAdmin) {
       nav.push({ key: "studio", label: "Policy Studio", icon: Icons.layers, href: "/admin#studio" });
       nav.push({ key: "users", label: "Team Access", icon: Icons.users, href: "/admin#users" });
+      nav.push({ key: "library", label: "Policy Library", icon: Icons.doc, href: "/admin#library" });
+    }
+    if (role === "super_admin") {
+      nav.push({ key: "audit", label: "Audit Log", icon: Icons.layers, href: "/admin#audit" });
     }
     nav.push({ key: "settings", label: "Settings", icon: Icons.settings, href: "/settings" });
 
@@ -254,6 +258,30 @@
     }
   }
 
+  /* ── JSON API ───────────────────────────────────────────────────────────
+     One fetch wrapper so every page reports failures the same way. Throws an
+     Error carrying the server's message, which callers surface via toast. */
+  async function api(path, options) {
+    var opts = options || {};
+    var init = { method: opts.method || "GET", headers: {} };
+    if (opts.body !== undefined) {
+      init.headers["Content-Type"] = "application/json";
+      init.body = JSON.stringify(opts.body);
+    }
+    var res = await fetch(path, init);
+    if (res.status === 401) {
+      window.location.href = "/login";
+      throw new Error("Session expired.");
+    }
+    var data = null;
+    try { data = await res.json(); } catch (e) { data = null; }
+    if (!res.ok) {
+      var message = (data && (data.detail || data.error)) || ("Request failed (" + res.status + ")");
+      throw new Error(message);
+    }
+    return data;
+  }
+
   /* ── Session ────────────────────────────────────────────────────────────── */
   var _me = null;
   async function me() {
@@ -298,6 +326,7 @@
     closeModal: closeModal,
     renderRail: renderRail,
     bindRail: bindRail,
+    api: api,
     me: me,
     roleLabel: roleLabel,
     autoGrow: autoGrow

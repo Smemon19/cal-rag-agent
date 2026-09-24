@@ -1,3 +1,5 @@
+import time
+
 import bcrypt
 from typing import Optional, Dict, Set
 from fastapi import Request, HTTPException
@@ -93,16 +95,68 @@ def require_login(request: Request) -> Dict:
     user = get_current_session_user(request)
     if not user:
         raise HTTPException(status_code=401, detail="Not authenticated.")
+    return revalidate_session_user(request, user)
+
+
+# How long a session may go without being re-checked against the database.
+# Deactivating or demoting a user takes effect within this window rather than
+# waiting out the full 8-hour cookie lifetime.
+SESSION_REVALIDATE_SECONDS = 60
+
+
+def revalidate_session_user(request: Request, user: Dict) -> Dict:
+    """
+    Re-read role and is_active from the database for a live session.
+
+    The session cookie carries the role captured at login, so a user who was
+    deactivated or demoted mid-session kept their old access until the cookie
+    expired. This re-checks periodically and clears the session when the
+    account is gone or disabled.
+
+    The result is cached in the session for SESSION_REVALIDATE_SECONDS so a
+    burst of requests does not mean a query each.
+    """
+    now = time.time()
+    checked_at = request.session.get("revalidated_at", 0)
+    if now - checked_at < SESSION_REVALIDATE_SECONDS:
+        return user
+
+    try:
+        rows = run_query(
+            "SELECT role, is_active, company_id FROM users WHERE id = %s",
+            (user["user_id"],),
+        )
+    except Exception:
+        # A database blip should not sign everybody out; keep the cached claims
+        # and re-check on the next request.
+        return user
+
+    if not rows:
+        request.session.clear()
+        raise HTTPException(status_code=401, detail="Account no longer exists.")
+
+    row = rows[0]
+    if not row["is_active"]:
+        request.session.clear()
+        raise HTTPException(status_code=401, detail="Account has been deactivated.")
+
+    # Pick up role or company changes without forcing a re-login.
+    request.session["role"] = row["role"]
+    request.session["company_id"] = str(row["company_id"]) if row["company_id"] else None
+    request.session["revalidated_at"] = now
+
+    user = dict(user)
+    user["role"] = row["role"]
+    user["company_id"] = request.session["company_id"]
     return user
 
 def require_roles(request: Request, allowed_roles: Set[str]) -> Dict:
     """
-    Raises HTTPException 401 if not logged in.
+    Raises HTTPException 401 if not logged in or no longer active.
     Raises HTTPException 403 if logged in but role not allowed.
-    Returns the session user dict.
-    TODO: Phase 2 - Re-check DB for is_active and role to ensure 
-          the user hasn't been disabled/demoted since the session was created.
+    Returns the session user dict, with the role refreshed from the database.
     """
+    # require_login already refreshed role/is_active from the database.
     user = require_login(request)
     if user["role"] not in allowed_roles:
         raise HTTPException(status_code=403, detail="Forbidden. Insufficient role.")
@@ -224,4 +278,58 @@ def reactivate_managed_user(current_user: dict, target_user_id: str) -> None:
     _verify_managed_user_target(current_user, target_user_id)
     execute("UPDATE users SET is_active = true WHERE id = %s", (target_user_id,))
     log_audit_action(current_user["user_id"], target_user_id, "reactivate_user", {})
+
+
+def update_managed_user(
+    current_user: dict,
+    target_user_id: str,
+    role: Optional[str] = None,
+    email: Optional[str] = None,
+) -> dict:
+    """
+    Change a managed user's role and/or email.
+
+    Previously the only way to promote someone to manager_admin, or to correct a
+    typo'd email, was direct SQL. Role changes are restricted to super admins:
+    a manager_admin may edit the employees it created, but may not change
+    anyone's role, which would otherwise let it mint peers.
+    """
+    target = _verify_managed_user_target(current_user, target_user_id)
+    curr_role = current_user.get("role")
+
+    updates: dict[str, object] = {}
+    details: dict[str, object] = {}
+
+    if role is not None and role != target["role"]:
+        if curr_role != "super_admin":
+            raise HTTPException(status_code=403, detail="Only a super admin can change roles.")
+        if role not in ("employee", "manager_admin"):
+            raise HTTPException(status_code=400, detail="Role must be employee or manager_admin.")
+        updates["role"] = role
+        details["role"] = {"from": target["role"], "to": role}
+
+    if email is not None:
+        clean_email = email.strip() or None
+        updates["email"] = clean_email
+        details["email"] = clean_email
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="Nothing to update.")
+
+    set_sql = ", ".join(f"{k} = %s" for k in updates)
+    params = tuple(updates.values()) + (target_user_id,)
+    try:
+        execute(f"UPDATE users SET {set_sql} WHERE id = %s", params)
+    except Exception as e:
+        if "unique constraint" in str(e).lower():
+            raise HTTPException(status_code=400, detail="That email is already in use.")
+        raise HTTPException(status_code=500, detail="Database error updating user.")
+
+    log_audit_action(current_user["user_id"], target_user_id, "update_user", details)
+
+    rows = run_query(
+        "SELECT id, username, email, role, is_active FROM users WHERE id = %s",
+        (target_user_id,),
+    )
+    return rows[0] if rows else {}
 

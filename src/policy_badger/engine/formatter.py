@@ -168,10 +168,19 @@ def _related_records_answer(rows: list[dict]) -> str:
     )
 
 
-def format_answer(question: str, rows: list[dict], intent: str | None = None) -> str:
+def format_answer(
+    question: str,
+    rows: list[dict],
+    intent: str | None = None,
+    directives: str = "",
+) -> str:
     """
     Produce a concise, structured answer from the user question and DB rows only.
     For comparison questions, multiple rows should be contrasted explicitly.
+
+    ``directives`` carries the asking user's answer preferences, already rendered
+    as prompt text by settings_db.build_answer_directives. It is appended last so
+    it can shape tone, length and format, but the evidence rules above still win.
     """
     if not rows:
         return f"{NO_POLICY_FOUND_TEXT}."
@@ -229,6 +238,7 @@ Instructions:
 - If action_text appears and is relevant, include it in "What You Should Do".
 - For comparison questions (A vs B), contrast the relevant rows clearly.
 - Keep the answer useful and concise. Avoid repeated points, robotic phrasing, and vague language like "may" unless the evidence explains the condition.
+{directives}
 """
 
     response = client.chat.completions.create(

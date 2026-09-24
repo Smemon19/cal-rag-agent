@@ -113,6 +113,48 @@ Important files:
 - `src/policy_badger/ingestion/publisher.py` validates staged records and publishes them to `policies_v2`.
 - `src/policy_badger/engine/migrations/0001_adaptive_ingestion_foundation.sql` creates the ingestion support tables.
 
+## Admin document upload
+
+Admins can upload a handbook or policy document (PDF, DOCX, TXT, MD) from the
+Policy Studio tab instead of pasting one policy at a time. Policy Badger
+extracts every policy the document contains, compares each against what is
+already published, and shows a review table labelling each candidate:
+
+| Label | Meaning |
+| --- | --- |
+| New | Nothing comparable is published |
+| Updates existing | Same topic, wording changed enough to look like a revision |
+| Already exists | A published policy already says substantially the same thing |
+| No rule found | The section carries no policy rule |
+
+New candidates are pre-selected; nothing is written to `policies_v2` until the
+admin confirms. Matching is lexical (token overlap), so a policy rewritten from
+scratch can surface as **New** rather than **Updates existing** — ingest it and
+retire the superseded row from the Policy Library tab.
+
+- `src/policy_badger/ingestion/dedup.py` classifies candidates against published policies.
+- `src/policy_badger/ingestion/document_upload.py` drives the pipeline and publishes the selected subset.
+
+## Migrations
+
+Migrations in `src/policy_badger/engine/migrations/` are applied in numeric
+order and are all safe to re-run.
+
+`0005_settings_conversations_policy_lifecycle.sql` must be applied before the
+settings page, chat history, or the admin Policy Library and Audit Log tabs
+will work. It adds `user_settings`, `conversations`, `conversation_messages`
+and `policy_admin_audit`, and adds lifecycle columns (`status`, `updated_at`,
+`superseded_by_policy_id`, `archived_at`, `archived_by_user_id`) to
+`policies_v2`.
+
+```bash
+psql -h <host> -d <database> -U <user> \
+  -f src/policy_badger/engine/migrations/0005_settings_conversations_policy_lifecycle.sql
+```
+
+Until it runs, those screens report that the feature is unavailable rather than
+failing outright; policy archiving and superseding return HTTP 503.
+
 Run adaptive ingestion from the CLI:
 
 ```bash
