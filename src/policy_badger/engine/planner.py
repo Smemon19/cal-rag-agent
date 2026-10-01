@@ -9,7 +9,8 @@ import json
 from typing import Any
 
 from dotenv import load_dotenv
-from openai import OpenAI
+
+from policy_badger.engine.llm import generate
 
 load_dotenv(override=True)
 
@@ -447,7 +448,7 @@ def fetch_db_context() -> str:
 
 def plan_search(question: str, db_context: str = "") -> dict[str, Any]:
     """
-    Call OpenAI (gpt-4o-mini) to produce a JSON search plan, then validate and normalize it.
+    Ask the chat model (Gemini, via policy_badger.engine.llm) to produce a JSON search plan, then validate and normalize it.
     Raises ValueError on empty question or invalid planner output.
     Pass db_context (from fetch_db_context()) to ground the planner in real DB values.
     """
@@ -471,20 +472,7 @@ def plan_search(question: str, db_context: str = "") -> dict[str, Any]:
         system_prompt = PLANNER_SYSTEM
         user_content = f"User question (plan retrieval only — do not answer it):\n{q}"
 
-    client = OpenAI()
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        response_format={"type": "json_object"},
-        temperature=0.0,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-    )
-
-    content = response.choices[0].message.content
-    if not content:
-        raise ValueError("Planner returned no content.")
+    content = generate(system_prompt, user_content, temperature=0.0, json_output=True)
 
     parsed = _parse_planner_json(content)
     search_spec = validate_and_normalize_search_spec(parsed)

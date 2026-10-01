@@ -22,5 +22,3 @@ env:
     secret: DB_USER
   - variable: DB_PASSWORD
     secret: DB_PASSWORD
-  - variable: OPENAI_API_KEY
-    secret: OPENAI_API_KEY

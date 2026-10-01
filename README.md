@@ -175,13 +175,19 @@ Required for the web app and policy engine:
 APP_SECRET_KEY=change-me
 APP_USER=Test
 APP_PASSWORD=Test123!
-OPENAI_API_KEY=...
+VERTEX_PROJECT_ID=...
+VERTEX_LOCATION=us-east1
 DB_HOST=...
 DB_PORT=5432
 DB_NAME=cal_policy_db
 DB_USER=postgres
 DB_PASSWORD=...
 ```
+
+Question answering calls Gemini (`gemini-2.5-flash` by default, override with
+`CHAT_LLM_MODEL`) through Vertex AI using the runtime's Google credentials, so
+no API key is needed: the Cloud Run service account on GCP, or
+`gcloud auth application-default login` locally.
 
 Optional for adaptive extraction and mirroring:
 

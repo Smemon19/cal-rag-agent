@@ -5,7 +5,8 @@ Final answer writer: grounded only on retrieved policy rows (no planning / no SQ
 import json
 
 from dotenv import load_dotenv
-from openai import OpenAI
+
+from policy_badger.engine.llm import generate
 
 load_dotenv(override=True)
 
@@ -71,8 +72,37 @@ def _has_required_structure(answer: str) -> bool:
     return all(header.lower() in lowered for header in required_headers)
 
 
+_SECTION_HEADERS = {
+    h.lower() for h in (DIRECT_ANSWER_HEADER, KEY_DETAILS_HEADER, IMPORTANT_NOTES_HEADER, ACTION_GUIDANCE_HEADER)
+}
+
+# Ways a model says the rows it was given do not cover the question.
+_NOT_COVERED_PHRASES = (
+    "do not contain", "does not contain", "don't contain", "doesn't contain",
+    "do not include", "does not include", "do not address", "does not address",
+    "do not mention", "does not mention", "no information",
+)
+
+
+def _says_not_covered(answer: str) -> bool:
+    lowered = answer.lower()
+    return any(phrase in lowered for phrase in _NOT_COVERED_PHRASES)
+
+
+def _strip_leading_header(line: str) -> str:
+    """Drop a section header the model put at the start of its first line."""
+    for header in (DIRECT_ANSWER_HEADER, KEY_DETAILS_HEADER, IMPORTANT_NOTES_HEADER, ACTION_GUIDANCE_HEADER):
+        if line.lower().startswith(header.lower()):
+            return line[len(header):].lstrip(" :-")
+    return line
+
+
 def _direct_answer_from_model(answer: str) -> str:
     lines = [line.strip(" -") for line in answer.splitlines() if line.strip()]
+    lines = [line for line in lines if line.lower().rstrip(":") not in _SECTION_HEADERS]
+    if lines:
+        lines[0] = _strip_leading_header(lines[0])
+    lines = [line for line in lines if line]
     if not lines:
         return "I found relevant policy information, but the retrieved rows do not support a more specific answer."
     direct = lines[0]
@@ -185,7 +215,6 @@ def format_answer(
     if not rows:
         return f"{NO_POLICY_FOUND_TEXT}."
 
-    client = OpenAI()
     rows_json = json.dumps(rows, default=str, indent=2)
 
     system = (
@@ -241,15 +270,11 @@ Instructions:
 {directives}
 """
 
-    response = client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": system},
-            {"role": "user", "content": user_content},
-        ],
-        temperature=0.1,
-    )
-    answer = (response.choices[0].message.content or "").strip()
+    answer = generate(system, user_content, temperature=0.1)
     if NO_POLICY_FOUND_TEXT.lower() in answer.lower():
+        return _related_records_answer(rows)
+    # An unstructured "these records don't cover it" reply would otherwise be
+    # padded with details from unrelated rows.
+    if not _has_required_structure(answer) and _says_not_covered(answer):
         return _related_records_answer(rows)
     return _structured_answer_from_model(answer, rows)

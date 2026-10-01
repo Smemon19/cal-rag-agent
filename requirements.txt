@@ -11,8 +11,8 @@ bcrypt
 # Database
 psycopg2-binary
 
-# LLM
-openai
+# LLM (Gemini via Vertex AI)
+google-genai
 
 # Ingestion pipeline
 google-cloud-aiplatform

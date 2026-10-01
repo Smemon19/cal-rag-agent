@@ -95,7 +95,7 @@ COMMON_ARGS=(
   # Set secrets. Note: SEED_SUPER_ADMIN_PASSWORD, SEED_SUPER_ADMIN_USERNAME, SEED_SUPER_ADMIN_EMAIL, SEED_COMPANY_NAME
   # can be configured via Secret Manager to securely initialize the first super admin upon first deployment.
   # Do not hardcode them.
-  --set-secrets="DB_HOST=DB_HOST:latest,DB_NAME=DB_NAME:latest,DB_USER=DB_USER:latest,DB_PASSWORD=DB_PASSWORD:latest,OPENAI_API_KEY=OPENAI_API_KEY:latest,APP_SECRET_KEY=APP_SECRET_KEY:latest,APP_USERS=APP_USERS:latest,SEED_SUPER_ADMIN_PASSWORD=SEED_SUPER_ADMIN_PASSWORD:latest"
+  --set-secrets="DB_HOST=DB_HOST:latest,DB_NAME=DB_NAME:latest,DB_USER=DB_USER:latest,DB_PASSWORD=DB_PASSWORD:latest,APP_SECRET_KEY=APP_SECRET_KEY:latest,APP_USERS=APP_USERS:latest,SEED_SUPER_ADMIN_PASSWORD=SEED_SUPER_ADMIN_PASSWORD:latest"
 
 )
 if [[ -n "$SERVICE_ACCOUNT" ]]; then

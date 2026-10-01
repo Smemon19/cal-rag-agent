@@ -5,40 +5,26 @@ import pytest
 from policy_badger.engine import formatter
 
 
-class _FakeMessage:
-    def __init__(self, content: str):
-        self.content = content
+def _fake_generate_with_answer(answer: str):
+    def fake_generate(system, user, **_kwargs):
+        return answer
+
+    return fake_generate
 
 
-class _FakeChoice:
-    def __init__(self, content: str):
-        self.message = _FakeMessage(content)
+def _capturing_generate(captured: dict, answer: str):
+    def fake_generate(system, user, **kwargs):
+        captured.update(system=system, user=user, **kwargs)
+        return answer
 
-
-class _FakeResponse:
-    def __init__(self, content: str):
-        self.choices = [_FakeChoice(content)]
-
-
-def _fake_openai_with_answer(answer: str):
-    class _FakeCompletions:
-        def create(self, **_kwargs):
-            return _FakeResponse(answer)
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        chat = _FakeChat()
-
-    return _FakeOpenAI
+    return fake_generate
 
 
 def test_zero_rows_returns_no_policy_found(monkeypatch: pytest.MonkeyPatch) -> None:
-    def fail_openai():
-        raise AssertionError("OpenAI should not be called when no rows are available")
+    def fail_generate(*_args, **_kwargs):
+        raise AssertionError("The model should not be called when no rows are available")
 
-    monkeypatch.setattr(formatter, "OpenAI", fail_openai)
+    monkeypatch.setattr(formatter, "generate", fail_generate)
 
     answer = formatter.format_answer("What is the relocation policy?", [])
 
@@ -48,8 +34,8 @@ def test_zero_rows_returns_no_policy_found(monkeypatch: pytest.MonkeyPatch) -> N
 def test_rows_exist_no_direct_answer_returns_related_summary(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         formatter,
-        "OpenAI",
-        _fake_openai_with_answer("No policy found in the retrieved data"),
+        "generate",
+        _fake_generate_with_answer("No policy found in the retrieved data"),
     )
     rows = [
         {
@@ -81,7 +67,7 @@ Key Details
 
 What You Should Do
 - Log only setup or breakdown time to Marketing."""
-    monkeypatch.setattr(formatter, "OpenAI", _fake_openai_with_answer(structured_answer))
+    monkeypatch.setattr(formatter, "generate", _fake_generate_with_answer(structured_answer))
 
     answer = formatter.format_answer(
         "Where should setup time go?",
@@ -94,8 +80,8 @@ What You Should Do
 def test_unstructured_answer_is_wrapped_with_action_guidance(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         formatter,
-        "OpenAI",
-        _fake_openai_with_answer("Yes, professional development time requires approval."),
+        "generate",
+        _fake_generate_with_answer("Yes, professional development time requires approval."),
     )
     rows = [
         {
@@ -123,35 +109,21 @@ def test_unstructured_answer_is_wrapped_with_action_guidance(monkeypatch: pytest
 def test_formatter_prompt_prioritizes_policy_fields(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeCompletions:
-        def create(self, **kwargs):
-            captured.update(kwargs)
-            return _FakeResponse(
-                """Direct Answer
+    monkeypatch.setattr(formatter, "generate", _capturing_generate(captured, """Direct Answer
 Use Marketing for event setup time.
 
 Key Details
 - Setup time belongs to Marketing.
 
 What You Should Do
-- Log setup time to Marketing."""
-            )
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        chat = _FakeChat()
-
-    monkeypatch.setattr(formatter, "OpenAI", _FakeOpenAI)
+- Log setup time to Marketing."""))
 
     formatter.format_answer(
         "Where should setup time go?",
         [{"topic": "Marketing", "action_text": "Log setup time to Marketing."}],
     )
 
-    messages = captured["messages"]
-    user_prompt = messages[1]["content"]
+    user_prompt = captured["user"]
     assert "Direct Answer" in user_prompt
     assert "Key Details" in user_prompt
     assert "Important Notes / Exceptions" in user_prompt
@@ -165,35 +137,51 @@ What You Should Do
 def test_formatter_adds_intent_instructions(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    class _FakeCompletions:
-        def create(self, **kwargs):
-            captured.update(kwargs)
-            return _FakeResponse("Direct Answer\nMock.")
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        chat = _FakeChat()
-
-    monkeypatch.setattr(formatter, "OpenAI", _FakeOpenAI)
+    monkeypatch.setattr(formatter, "generate", _capturing_generate(captured, "Direct Answer\nMock."))
 
     # Test expense_category
     formatter.format_answer("client dinner", [{"topic": "Meals"}], intent="expense_category")
-    assert "emphasize the category FIRST" in captured["messages"][1]["content"]
+    assert "emphasize the category FIRST" in captured["user"]
 
     # Test approval_requirement
     formatter.format_answer("approval", [{"topic": "Meals"}], intent="approval_requirement")
-    assert "YES/NO first" in captured["messages"][1]["content"]
+    assert "YES/NO first" in captured["user"]
 
     # Test complete_list
     formatter.format_answer("list", [{"topic": "Meals"}], intent="complete_list")
-    assert "full list cleanly" in captured["messages"][1]["content"]
+    assert "full list cleanly" in captured["user"]
 
     # Test definition
     formatter.format_answer("definition", [{"topic": "Meals"}], intent="definition")
-    assert "clean definition first" in captured["messages"][1]["content"]
+    assert "clean definition first" in captured["user"]
 
     # Test procedure_steps
     formatter.format_answer("how to", [{"topic": "Meals"}], intent="procedure_steps")
-    assert "step-by-step instructions" in captured["messages"][1]["content"]
+    assert "step-by-step instructions" in captured["user"]
+
+
+def test_unstructured_not_covered_reply_is_not_padded_with_unrelated_rows(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        formatter,
+        "generate",
+        _fake_generate_with_answer("Direct Answer The provided policy records do not contain information about pets."),
+    )
+    rows = [{"topic": "PTO", "condition_text": "When an employee wants paid time off", "action_text": "Submit two weeks ahead."}]
+
+    answer = formatter.format_answer("Can I bring my dog to work?", rows)
+
+    assert "I found related policy records, but not a direct answer" in answer
+    assert "Applies when" not in answer
+
+
+def test_header_on_first_line_is_not_repeated(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        formatter,
+        "generate",
+        _fake_generate_with_answer("Direct Answer: Timesheets are due Friday by 5 PM."),
+    )
+
+    answer = formatter.format_answer("When are timesheets due?", [{"topic": "Timesheets", "action_text": "Submit by Friday 5pm."}])
+
+    assert answer.count("Direct Answer") == 1
+    assert "Timesheets are due Friday by 5 PM." in answer

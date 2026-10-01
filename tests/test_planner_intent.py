@@ -3,33 +3,12 @@ from __future__ import annotations
 from policy_badger.engine import planner
 
 
-class _FakeMessage:
-    def __init__(self, content: str):
-        self.content = content
+def _fake_generate_with_plan(plan_json: str):
+    def fake_generate(system, user, **kwargs):
+        assert kwargs.get("json_output") is True
+        return plan_json
 
-
-class _FakeChoice:
-    def __init__(self, content: str):
-        self.message = _FakeMessage(content)
-
-
-class _FakeResponse:
-    def __init__(self, content: str):
-        self.choices = [_FakeChoice(content)]
-
-
-def _fake_openai_with_plan(plan_json: str):
-    class _FakeCompletions:
-        def create(self, **_kwargs):
-            return _FakeResponse(plan_json)
-
-    class _FakeChat:
-        completions = _FakeCompletions()
-
-    class _FakeOpenAI:
-        chat = _FakeChat()
-
-    return _FakeOpenAI
+    return fake_generate
 
 
 def test_classify_complete_list() -> None:
@@ -52,8 +31,8 @@ def test_classify_procedure_steps() -> None:
 def test_plan_search_attaches_intent_and_tunes_complete_list(monkeypatch) -> None:
     monkeypatch.setattr(
         planner,
-        "OpenAI",
-        _fake_openai_with_plan(
+        "generate",
+        _fake_generate_with_plan(
             """
             {
               "table": "policies_v2",
@@ -81,8 +60,8 @@ def test_plan_search_attaches_intent_and_tunes_complete_list(monkeypatch) -> Non
 def test_plan_search_prioritizes_charge_fields_for_expense_intent(monkeypatch) -> None:
     monkeypatch.setattr(
         planner,
-        "OpenAI",
-        _fake_openai_with_plan(
+        "generate",
+        _fake_generate_with_plan(
             """
             {
               "table": "policies_v2",
