@@ -7,7 +7,7 @@ from typing import Any, Dict
 from policy_badger.ingestion.policy_extractor import PolicyExtractor
 from policy_badger.ingestion.schema_dictionary import SchemaDictionary
 from policy_badger.engine.formatter import format_answer
-from policy_badger.engine.db import execute, run_query
+from policy_badger.engine.db import transaction
 
 @dataclass
 class AdminSubmission:
@@ -154,56 +154,67 @@ def publish_submission(submission: AdminSubmission, published_by: str | None = N
     if not item:
         raise ValueError("No extracted data to publish")
         
-    topic = item.get("topic") or "General"
-    subtopic = item.get("subtopic")
-    condition_text = item.get("condition_text")
-    action_text = item.get("action_text")
-    source_quote = item.get("source_quote") or submission.raw_text
-    
-    sql = """
-        INSERT INTO policies_v2 (
-            topic, subtopic, condition_text, action_text, source_quote, status
-        ) VALUES (
-            %s, %s, %s, %s, %s, 'active'
-        ) RETURNING policy_id
-    """
-    params = (topic, subtopic, condition_text, action_text, source_quote)
-    
-    # Simulate insert if we can't get returning id natively from generic execute
-    # Actually, execute in db.py returns rowcount for INSERT. 
-    # To get RETURNING we need to use run_query
-    rows = run_query(sql, params)
-    policy_id = rows[0]["policy_id"] if rows else "unknown"
-    
+    values = {field: item.get(field) for field in PUBLISHABLE_FIELDS}
+    values["topic"] = values.get("topic") or "General"
+    values["source_quote"] = values.get("source_quote") or submission.raw_text
+    values["status"] = "active"
+    published_at = datetime.datetime.now()
+
+    # The policy row and its audit row commit together or not at all. The
+    # insert previously went through run_query, which never commits, so the
+    # policy was silently rolled back.
+    with transaction() as cur:
+        cur.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_schema = 'public' AND table_name = 'policies_v2'"
+        )
+        table_columns = {row["column_name"] for row in cur.fetchall()}
+        columns = [c for c in values if c in table_columns and values[c] not in (None, "")]
+        cur.execute(
+            "INSERT INTO policies_v2 ({}) VALUES ({}) RETURNING policy_id".format(
+                ", ".join(f'"{c}"' for c in columns), ", ".join(["%s"] * len(columns))
+            ),
+            tuple(values[c] for c in columns),
+        )
+        policy_id = cur.fetchone()["policy_id"]
+
+        cur.execute(_AUDIT_SQL, (
+            submission.id,
+            str(policy_id),
+            submission.submitted_by,
+            published_by,
+            submission.raw_text,
+            json.dumps(submission.extracted_json),
+            json.dumps(submission.extracted_json),
+            submission.source_type,
+            submission.version,
+            submission.replaces_policy_id,
+            submission.created_at,
+            published_at,
+        ))
+
+    # Only mark the submission published once the commit has succeeded, so a
+    # failed attempt can be retried.
     submission.status = "published"
-    submission.published_at = datetime.datetime.now()
+    submission.published_at = published_at
     submission.published_by = published_by
     submission.published_policy_id = str(policy_id)
-    
-    # Insert audit record
-    audit_sql = """
-        INSERT INTO admin_policy_publish_audit (
-            submission_id, published_policy_id, submitted_by, published_by,
-            raw_text, extracted_json, final_json, source_type, version,
-            replaces_policy_id, created_at, published_at
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-        )
-    """
-    audit_params = (
-        submission.id,
-        submission.published_policy_id,
-        submission.submitted_by,
-        submission.published_by,
-        submission.raw_text,
-        json.dumps(submission.extracted_json),
-        json.dumps(submission.extracted_json),
-        submission.source_type,
-        submission.version,
-        submission.replaces_policy_id,
-        submission.created_at,
-        submission.published_at
-    )
-    execute(audit_sql, audit_params)
-    
     return str(policy_id)
+
+
+# Fields an admin can edit in Policy Studio; each is written when the live
+# table has that column.
+PUBLISHABLE_FIELDS = (
+    "topic", "subtopic", "summary", "condition_text", "action_text",
+    "approval_required", "approver", "exception_text", "source_quote",
+)
+
+_AUDIT_SQL = """
+    INSERT INTO admin_policy_publish_audit (
+        submission_id, published_policy_id, submitted_by, published_by,
+        raw_text, extracted_json, final_json, source_type, version,
+        replaces_policy_id, created_at, published_at
+    ) VALUES (
+        %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+    )
+"""

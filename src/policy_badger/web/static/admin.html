@@ -322,8 +322,6 @@
     }
 
     function bindAdminRail() {
-      document.getElementById('new-chat-btn').addEventListener('click', () => { location.href = '/'; });
-      document.getElementById('rail-search-btn').addEventListener('click', () => { location.href = '/#chats'; });
       document.getElementById('rail-menu').addEventListener('click', () => {
         if (document.getElementById('rail').classList.contains('open')) {
           closeRail();
@@ -1147,9 +1145,11 @@
       const isAdmin = currentUser && ['super_admin', 'manager_admin'].includes(currentUser.role);
       const requested = location.hash.slice(1);
       const active = TAB_NAMES.includes(requested) ? requested : 'studio';
+      const railData = await Badger.loadRailData();
       document.getElementById('app').insertAdjacentHTML('afterbegin',
-        Badger.renderRail({ active, user: currentUser, folders: [], threads: [] }));
+        Badger.renderRail({ active, user: currentUser, folders: railData.folders, threads: railData.threads }));
       Badger.bindRail();
+      Badger.bindRailNavigation();
       bindAdminRail();
       document.querySelectorAll('[data-icon]').forEach(node => {
         node.innerHTML = Badger.Icons[node.dataset.icon](17);

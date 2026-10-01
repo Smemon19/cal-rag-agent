@@ -507,22 +507,15 @@
 
     var user = await Badger.me();
 
+    var railData = await Badger.loadRailData();
     Badger.el("rail-host").outerHTML = Badger.renderRail({
       active: "settings",
       user: user,
-      folders: [
-        { label: "Time & Attendance", spine: "var(--mint)" },
-        { label: "Expenses & Travel", spine: "var(--amber)" },
-        { label: "HR & Conduct", spine: "var(--rose)" }
-      ],
-      threads: []
+      folders: railData.folders,
+      threads: railData.threads
     });
     Badger.bindRail();
-
-    var newChat = Badger.el("new-chat-btn");
-    if (newChat) newChat.addEventListener("click", function () { window.location.href = "/"; });
-    var search = Badger.el("rail-search-btn");
-    if (search) search.addEventListener("click", function () { window.location.href = "/"; });
+    Badger.bindRailNavigation();
 
     if (user) {
       Badger.el("acct-name").textContent = user.username || "Signed in";

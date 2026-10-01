@@ -202,7 +202,8 @@
 
         '<div class="rail-panel">' +
           '<button class="rail-item boxed" id="new-chat-btn">' + Icons.plus(17) + "<span>New Chat</span></button>" +
-          '<button class="rail-item boxed" id="rail-search-btn">' + Icons.search(17) + "<span>Search</span></button>" +
+          '<button class="rail-item boxed" id="rail-search-btn" aria-controls="rail-search-input" aria-expanded="false">' + Icons.search(17) + "<span>Search</span></button>" +
+          '<input type="search" class="rail-search hidden" id="rail-search-input" placeholder="Search your chats" aria-label="Search your chats" autocomplete="off">' +
 
           '<div class="rail-divider"></div>' +
           navHtml +
@@ -256,6 +257,130 @@
         if (r) r.classList.toggle("open");
       });
     }
+  }
+
+  /* Filter the rendered chat list by title. Date headings stay only while
+     they still have a visible chat under them. */
+  function filterThreads(query) {
+    var list = el("rail-threads");
+    if (!list) return;
+    var q = String(query || "").trim().toLowerCase();
+    var shown = 0;
+    var heading = null;
+    var headingHasMatch = false;
+    function closeHeading() {
+      if (heading) heading.classList.toggle("hidden", !headingHasMatch);
+    }
+    Array.prototype.forEach.call(list.children, function (node) {
+      if (node.classList.contains("rail-date") && !node.hasAttribute("data-empty")) {
+        closeHeading();
+        heading = node;
+        headingHasMatch = false;
+        return;
+      }
+      if (!node.hasAttribute("data-thread")) return;
+      var label = (node.querySelector(".row-label") || node).textContent.toLowerCase();
+      var match = !q || label.indexOf(q) !== -1;
+      node.classList.toggle("hidden", !match);
+      if (match) { shown += 1; headingHasMatch = true; }
+    });
+    closeHeading();
+    var empty = list.querySelector("[data-empty]");
+    var total = list.querySelectorAll("[data-thread]").length;
+    if (q && total && !shown) {
+      if (!empty) {
+        empty = document.createElement("div");
+        empty.className = "rail-date";
+        empty.setAttribute("data-empty", "");
+        list.appendChild(empty);
+      }
+      empty.textContent = "No chats match \u201c" + query.trim() + "\u201d";
+    } else if (empty) {
+      empty.remove();
+    }
+  }
+
+  /* Show the chat search box and keep the list filtered as the user types.
+     Re-applies the current query when the list is re-rendered. */
+  function bindRailSearch() {
+    var btn = el("rail-search-btn");
+    var input = el("rail-search-input");
+    if (!btn || !input || input.dataset.bound) return;
+    input.dataset.bound = "1";
+    btn.addEventListener("click", function () { openRailSearch(); });
+    input.addEventListener("input", function () { filterThreads(input.value); });
+    input.addEventListener("keydown", function (e) {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        input.value = "";
+        filterThreads("");
+        input.classList.add("hidden");
+        btn.setAttribute("aria-expanded", "false");
+        btn.focus();
+      }
+    });
+  }
+  function openRailSearch() {
+    var btn = el("rail-search-btn");
+    var input = el("rail-search-input");
+    if (!input) return;
+    var rail = el("rail");
+    if (rail) rail.classList.add("open");
+    input.classList.remove("hidden");
+    if (btn) btn.setAttribute("aria-expanded", "true");
+    input.focus();
+  }
+
+  /* Real policy areas and conversations for the rail on pages other than the
+     chat page. Failures leave the rail empty rather than breaking the page. */
+  var SPINES = ["var(--mint)", "var(--amber)", "var(--rose)", "var(--lime)", "var(--sky)"];
+  function conversationGroup(iso) {
+    var when = new Date(iso);
+    if (isNaN(when.getTime())) return "Earlier";
+    var startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    var days = Math.floor((startOfToday - when) / 86400000);
+    if (days <= 0) return "Today";
+    if (days === 1) return "Yesterday";
+    if (days < 7) return "This week";
+    return "Earlier";
+  }
+  async function loadRailData() {
+    var out = { folders: [], threads: [] };
+    var results = await Promise.all([
+      fetch("/api/topics").then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; }),
+      fetch("/api/conversations").then(function (r) { return r.ok ? r.json() : {}; }).catch(function () { return {}; })
+    ]);
+    out.folders = (results[0].topics || []).slice(0, 6).map(function (label, i) {
+      return {
+        label: label,
+        spine: SPINES[i % SPINES.length],
+        question: "What is the policy on " + label + "?",
+        href: "/?ask=" + encodeURIComponent("What is the policy on " + label + "?")
+      };
+    });
+    out.threads = (results[1].conversations || []).map(function (c) {
+      return { id: c.id, label: c.title, group: conversationGroup(c.updated_at) };
+    });
+    return out;
+  }
+
+  /* On pages other than chat, rail chats and policy areas open the chat page.
+     Their per-row menus have no action here, so they are removed. */
+  function bindRailNavigation() {
+    var rail = el("rail");
+    if (!rail) return;
+    rail.querySelectorAll(".grp-actions, .row-more").forEach(function (n) { n.remove(); });
+    var list = el("rail-threads");
+    if (list) {
+      list.addEventListener("click", function (e) {
+        var row = e.target.closest("[data-thread]");
+        if (row) window.location.href = "/?c=" + encodeURIComponent(row.getAttribute("data-thread"));
+      });
+    }
+    var newChat = el("new-chat-btn");
+    if (newChat) newChat.addEventListener("click", function () { window.location.href = "/"; });
+    bindRailSearch();
   }
 
   /* ── JSON API ───────────────────────────────────────────────────────────
@@ -326,6 +451,12 @@
     closeModal: closeModal,
     renderRail: renderRail,
     bindRail: bindRail,
+    bindRailSearch: bindRailSearch,
+    bindRailNavigation: bindRailNavigation,
+    openRailSearch: openRailSearch,
+    filterThreads: filterThreads,
+    loadRailData: loadRailData,
+    conversationGroup: conversationGroup,
     api: api,
     me: me,
     roleLabel: roleLabel,

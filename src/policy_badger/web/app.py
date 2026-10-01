@@ -91,6 +91,16 @@ ASSETS_DIR = PUBLIC_DIR / "assets"
 # behind the per-route session checks below.
 app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
+
+@app.middleware("http")
+async def revalidate_assets(request: Request, call_next):
+    """Make browsers revalidate shared JS/CSS so a deploy never pairs new HTML
+    with a stale cached badger.js. The ETag keeps unchanged files a 304."""
+    response = await call_next(request)
+    if request.url.path.startswith("/assets/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
+
 # ── Seeding Logic ─────────────────────────────────────────────────────────────
 @app.on_event("startup")
 def _seed_super_admin():
@@ -424,7 +434,11 @@ async def api_admin_preview(req: EditRequest, request: Request):
     if missing_fields:
         return JSONResponse({"error": f"Missing required fields: {', '.join(missing_fields)}"}, status_code=400)
 
-    preview_data = preview_submission(sub)
+    try:
+        preview_data = preview_submission(sub)
+    except Exception as e:
+        logging.exception("Policy preview failed")
+        return JSONResponse({"error": f"Could not generate preview: {e}"}, status_code=502)
     if not preview_data:
         return JSONResponse({"error": "Could not generate preview."}, status_code=400)
 
@@ -453,7 +467,7 @@ async def api_admin_publish(req: EditRequest, request: Request):
         return JSONResponse({"error": f"Cannot publish. Missing required fields: {', '.join(missing_fields)}"}, status_code=400)
 
     try:
-        policy_id = publish_submission(sub)
+        policy_id = publish_submission(sub, published_by=user.get("username"))
         return {"policy_id": policy_id, "message": "Success"}
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

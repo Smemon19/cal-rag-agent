@@ -246,14 +246,29 @@
           node.title = 'Delete conversation';
         });
         B.el('rail-threads').replaceChildren(...list.childNodes);
+        B.filterThreads(B.el('rail-search-input').value);
       }
       B.el('rail-threads').addEventListener('click', async event => {
         const button = event.target.closest('[data-thread]');
         if (!button) return;
         const conversationId = button.dataset.thread;
 
-        if (event.target.closest('.row-more')) {
+        const more = event.target.closest('.row-more');
+        if (more) {
           event.stopPropagation();
+          // First click arms the button; a second click within a few seconds deletes.
+          if (!more.classList.contains('confirming')) {
+            more.classList.add('confirming');
+            more.textContent = 'Delete?';
+            more.setAttribute('aria-label', 'Confirm delete conversation');
+            setTimeout(() => {
+              if (!more.isConnected) return;
+              more.classList.remove('confirming');
+              more.innerHTML = icons.dotsH(14);
+              more.setAttribute('aria-label', 'Delete conversation');
+            }, 4000);
+            return;
+          }
           try {
             await B.api('/api/conversations/' + encodeURIComponent(conversationId), { method: 'DELETE' });
             if (conversationId === currentConversationId) resetChat();
@@ -282,11 +297,19 @@
         event.preventDefault(); resetChat();
       });
       rail.querySelector('a[href="/#chats"]').addEventListener('click', event => {
-        event.preventDefault(); closeRail();
-        if (threads.length) { chat.focus(); scrollDown(); }
-        else input.focus();
+        event.preventDefault(); showChats();
       });
-      B.el('rail-search-btn').addEventListener('click', () => { closeRail(); input.focus(); });
+      // Reveal the Chats list in the rail and move focus to the newest chat.
+      function showChats() {
+        rail.classList.add('open'); syncRail();
+        const group = rail.querySelector('.rail-group[data-group="threads"]');
+        if (group && group.classList.contains('collapsed')) group.click();
+        const first = B.el('rail-threads').querySelector('[data-thread]:not(.hidden)');
+        if (first) first.focus();
+        else { closeRail(); input.focus(); B.toast('No conversations yet. Ask a question to start one.'); }
+      }
+      B.bindRailSearch();
+      B.el('rail-search-btn').addEventListener('click', syncRail);
       B.el('new-chat-btn').addEventListener('click', resetChat);
       B.el('new-question-btn').addEventListener('click', resetChat);
 
@@ -482,6 +505,19 @@
 
       await refreshConversations();
       updateSend();
+
+      // Deep links from the rail on other pages: ?c= opens a conversation,
+      // ?ask= prefills a question, #chats and #search reveal the chat list.
+      const params = new URLSearchParams(location.search);
+      if (params.has('c') || params.has('ask')) history.replaceState(null, '', '/' + location.hash);
+      if (params.get('c')) openConversation(params.get('c'));
+      else if (params.get('ask')) {
+        input.value = params.get('ask');
+        input.dispatchEvent(new Event('input'));
+        input.focus();
+      }
+      if (location.hash === '#chats') showChats();
+      else if (location.hash === '#search') { B.openRailSearch(); syncRail(); }
     });
   </script>
 </body>

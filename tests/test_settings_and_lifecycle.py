@@ -226,3 +226,17 @@ def test_rename_rejects_blank_title(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         conversations_db.rename_conversation("user-a", "c1", "   ")
     assert excinfo.value.status_code == 400
+
+
+def test_malformed_conversation_id_is_not_found_without_querying(monkeypatch):
+    def fail(*args, **kwargs):
+        raise AssertionError("database should not be queried for a malformed id")
+
+    monkeypatch.setattr(conversations_db, "run_query", fail)
+    for call in (
+        lambda: conversations_db.get_conversation("u1", "None"),
+        lambda: conversations_db.delete_conversation("u1", "not-a-uuid"),
+    ):
+        with pytest.raises(HTTPException) as exc:
+            call()
+        assert exc.value.status_code == 404

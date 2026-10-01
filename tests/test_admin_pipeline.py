@@ -7,6 +7,43 @@ from policy_badger.ingestion.admin_input_pipeline import (
     preview_submission,
     publish_submission
 )
+from contextlib import contextmanager
+
+
+class FakeCursor:
+    """Records statements run inside admin_input_pipeline.transaction()."""
+
+    def __init__(self, policy_id="test_id_123", columns=None, fail_on=None):
+        self.policy_id = policy_id
+        self.columns = columns or [
+            "policy_id", "topic", "subtopic", "summary", "condition_text", "action_text",
+            "approval_required", "approver", "exception_text", "source_quote", "status",
+        ]
+        self.fail_on = fail_on
+        self.statements = []
+        self.committed = False
+        self._last = None
+
+    def execute(self, sql, params=None):
+        if self.fail_on and self.fail_on in sql:
+            raise RuntimeError("boom")
+        self.statements.append((sql, params))
+        self._last = sql
+
+    def fetchall(self):
+        return [{"column_name": c} for c in self.columns]
+
+    def fetchone(self):
+        return {"policy_id": self.policy_id}
+
+
+def use_fake_transaction(monkeypatch, cursor):
+    @contextmanager
+    def fake_transaction():
+        yield cursor
+        cursor.committed = True
+
+    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.transaction", fake_transaction)
 
 def test_extraction_works(monkeypatch):
     sub = create_submission("Test Policy", "If you work late, charge dinner to 1234.")
@@ -99,30 +136,50 @@ def test_preview_works(monkeypatch):
 
 def test_publish_inserts_correctly(monkeypatch):
     sub = AdminSubmission(id="1", title="T", raw_text="R", status="extracted")
-    sub.extracted_json = {"item": {"topic": "Meals", "action_text": "Eat", "source_quote": "Q"}}
+    sub.extracted_json = {"item": {
+        "topic": "Meals", "action_text": "Eat", "source_quote": "Q",
+        "approver": "Finance", "approval_required": True, "unknown_field": "x",
+    }}
+    cur = FakeCursor()
+    use_fake_transaction(monkeypatch, cur)
 
-    # Mock DB run_query
-    called_sql = ""
-    called_params = ()
-    def mock_run_query(sql, params):
-        nonlocal called_sql, called_params
-        called_sql = sql
-        called_params = params
-        return [{"policy_id": "test_id_123"}]
-        
-    def mock_execute(sql, params):
-        pass
-    
-    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.run_query", mock_run_query)
-    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.execute", mock_execute)
-    
     policy_id = publish_submission(sub)
-    
+
+    insert_sql, insert_params = next(st for st in cur.statements if "INSERT INTO policies_v2" in st[0])
     assert policy_id == "test_id_123"
-    assert "INSERT INTO policies_v2" in called_sql
-    assert called_params[0] == "Meals"
-    assert called_params[3] == "Eat"
+    assert cur.committed
+    # Every Studio-editable field present on the table is written.
+    for column, value in {"topic": "Meals", "action_text": "Eat", "approver": "Finance", "approval_required": True}.items():
+        assert f'"{column}"' in insert_sql
+        assert value in insert_params
+    assert "unknown_field" not in insert_sql
     assert sub.status == "published"
+
+
+def test_publish_skips_columns_missing_from_table(monkeypatch):
+    sub = AdminSubmission(id="1", title="T", raw_text="R", status="extracted")
+    sub.extracted_json = {"item": {"topic": "Meals", "action_text": "Eat", "approver": "Finance"}}
+    cur = FakeCursor(columns=["policy_id", "topic", "action_text", "source_quote", "status"])
+    use_fake_transaction(monkeypatch, cur)
+
+    publish_submission(sub)
+
+    insert_sql = next(st[0] for st in cur.statements if "INSERT INTO policies_v2" in st[0])
+    assert '"approver"' not in insert_sql
+
+
+def test_failed_audit_leaves_submission_retryable(monkeypatch):
+    sub = AdminSubmission(id="1", title="T", raw_text="R", status="extracted")
+    sub.extracted_json = {"item": {"topic": "Meals", "action_text": "Eat", "source_quote": "Q"}}
+    cur = FakeCursor(fail_on="admin_policy_publish_audit")
+    use_fake_transaction(monkeypatch, cur)
+
+    with pytest.raises(RuntimeError):
+        publish_submission(sub)
+
+    assert not cur.committed
+    assert sub.status == "extracted"
+    assert sub.published_policy_id is None
 
 def test_vague_input_triggers_clarification():
     sub = AdminSubmission(id="1", title="T", raw_text="Just do it.")
@@ -202,22 +259,9 @@ def test_publish_submission_stores_audit_record(monkeypatch):
     )
     sub.extracted_json = {"item": {"topic": "Audit", "action_text": "Do audit", "source_quote": "Q"}}
 
-    called_sqls = []
-    called_params = []
-    
-    def mock_run_query(sql, params):
-        called_sqls.append(sql)
-        called_params.append(params)
-        return [{"policy_id": "new_policy_123"}]
-        
-    def mock_execute(sql, params):
-        called_sqls.append(sql)
-        called_params.append(params)
-        return 1
+    cur = FakeCursor(policy_id="new_policy_123")
+    use_fake_transaction(monkeypatch, cur)
 
-    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.run_query", mock_run_query)
-    monkeypatch.setattr("policy_badger.ingestion.admin_input_pipeline.execute", mock_execute)
-    
     # We can simulate replacing an older policy
     sub.replaces_policy_id = "old_policy_456"
     
@@ -228,9 +272,9 @@ def test_publish_submission_stores_audit_record(monkeypatch):
     assert sub.published_by == "publisher@example.com"
     assert sub.published_at is not None
     
-    # Verify execute was called for the audit log
-    audit_sql = called_sqls[1]
-    audit_args = called_params[1]
+    # The audit row is written in the same transaction as the policy.
+    audit_sql, audit_args = cur.statements[-1]
+    assert cur.committed
     
     assert "INSERT INTO admin_policy_publish_audit" in audit_sql
     # audit_params: (submission.id, submission.published_policy_id, submission.submitted_by, submission.published_by, submission.raw_text, json.dumps(submission.extracted_json), json.dumps(submission.extracted_json), submission.source_type, submission.version, submission.replaces_policy_id, submission.created_at, submission.published_at)

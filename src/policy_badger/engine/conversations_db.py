@@ -12,6 +12,7 @@ not exist.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any, Optional
 
 from fastapi import HTTPException
@@ -20,6 +21,14 @@ from policy_badger.engine.db import execute, run_query, transaction
 
 MAX_TITLE_LEN = 80
 MAX_CONVERSATIONS = 200
+
+
+def _require_uuid(conversation_id: str) -> None:
+    """A malformed id cannot name a conversation; answer 404, not a SQL error."""
+    try:
+        uuid.UUID(str(conversation_id))
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Conversation not found.")
 
 
 def _derive_title(question: str) -> str:
@@ -52,6 +61,7 @@ def list_conversations(user_id: str, limit: int = 50) -> list[dict]:
 
 def get_conversation(user_id: str, conversation_id: str) -> dict[str, Any]:
     """Full transcript for one conversation the user owns."""
+    _require_uuid(conversation_id)
     rows = run_query(
         "SELECT id, title, created_at, updated_at FROM conversations WHERE id = %s AND user_id = %s",
         (conversation_id, user_id),
@@ -84,6 +94,7 @@ def create_conversation(user_id: str, title: Optional[str] = None) -> dict[str, 
 
 
 def _assert_owned(user_id: str, conversation_id: str) -> None:
+    _require_uuid(conversation_id)
     rows = run_query(
         "SELECT 1 FROM conversations WHERE id = %s AND user_id = %s",
         (conversation_id, user_id),
