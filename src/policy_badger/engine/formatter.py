@@ -3,6 +3,7 @@ Final answer writer: grounded only on retrieved policy rows (no planning / no SQ
 """
 
 import json
+import re
 
 from dotenv import load_dotenv
 
@@ -82,6 +83,15 @@ _NOT_COVERED_PHRASES = (
     "do not include", "does not include", "do not address", "does not address",
     "do not mention", "does not mention", "no information",
 )
+
+
+_MARKDOWN_EMPHASIS = re.compile(r"(\*\*|__)(.+?)\1")
+
+
+def _strip_markdown_emphasis(text: str) -> str:
+    """Turn **bold** / __bold__ into plain text and drop leading Markdown heading marks."""
+    text = _MARKDOWN_EMPHASIS.sub(r"\2", text)
+    return re.sub(r"^#{1,6}\s+", "", text, flags=re.MULTILINE)
 
 
 def _says_not_covered(answer: str) -> bool:
@@ -219,7 +229,8 @@ def format_answer(
 
     system = (
         "You are a policy assistant. Answer the user's question using ONLY the evidence in the provided rows. "
-        "Do not invent facts. Do not hallucinate rules or codes. Be clear, practical, and slightly conversational."
+        "Do not invent facts. Do not hallucinate rules or codes. Be clear, practical, and slightly conversational. "
+        "Write plain text only: no Markdown such as **bold**, *italics* or # headings. Use \"- \" for bullet points."
     )
     intent_instruction = ""
     if intent == "expense_category":
@@ -270,7 +281,8 @@ Instructions:
 {directives}
 """
 
-    answer = generate(system, user_content, temperature=0.1)
+    # The chat UI renders plain text, so stray Markdown emphasis shows as literal asterisks.
+    answer = _strip_markdown_emphasis(generate(system, user_content, temperature=0.1))
     if NO_POLICY_FOUND_TEXT.lower() in answer.lower():
         return _related_records_answer(rows)
     # An unstructured "these records don't cover it" reply would otherwise be

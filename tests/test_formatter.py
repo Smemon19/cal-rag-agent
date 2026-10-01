@@ -185,3 +185,21 @@ def test_header_on_first_line_is_not_repeated(monkeypatch: pytest.MonkeyPatch) -
 
     assert answer.count("Direct Answer") == 1
     assert "Timesheets are due Friday by 5 PM." in answer
+
+
+def test_markdown_emphasis_is_removed(monkeypatch: pytest.MonkeyPatch) -> None:
+    structured = """Direct Answer
+**Yes**, approval is required.
+
+Key Details
+- **Approver:** your supervisor
+
+What You Should Do
+- **Obtain Preapproval:** ask before taking leave."""
+    monkeypatch.setattr(formatter, "generate", _fake_generate_with_answer(structured))
+
+    answer = formatter.format_answer("Do I need approval?", [{"topic": "Leave", "action_text": "Get approval."}])
+
+    assert "**" not in answer
+    assert "- Obtain Preapproval: ask before taking leave." in answer
+    assert answer.startswith("Direct Answer\nYes, approval is required.")
